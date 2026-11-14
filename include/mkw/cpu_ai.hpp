@@ -36,6 +36,9 @@ public:
         // Time Trials: a human racer the QA autopilot drives steers by input
         // only, so the run replays as a ghost (the body yaw below is not input).
         bool inputOnlyHumans=false;
+        // Demo stages (gameMode 0xB winning run / 0xC credits): AIControlDemo driving. The
+        // host passes humanMask 0 (Racedata_initAwards makes every racer a CPU).
+        bool demo=false;
         CpuSpeedParam speed{};bool speedReady=false;
         std::array<CpuActionParam,12> actions{};bool actionsReady=false;
         // Rank distances: raceCompletion times the mean checkpoint lap length
@@ -181,6 +184,7 @@ private:
     bool endDriftHere(const Path& p) const;
     // AIControlRace / kart controller.
     void drive(unsigned racer);
+    void stepDemo(uint32_t driveMask);
     // AISpeedRace / AIRankManager.
     void updateRanks(const std::array<unsigned,Capacity>& ranks,const std::array<unsigned,Capacity>& laps,
                      const std::array<bool,Capacity>& finished,unsigned finalLap);

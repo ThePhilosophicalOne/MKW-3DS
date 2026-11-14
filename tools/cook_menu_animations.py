@@ -194,6 +194,10 @@ def main():
     # RaceMenuPage_onInit (PAL 0x80858D60): the pause diagram and page 0x2C's window.
     controller_paths += [ROOT / 'assets/race-ui/Race/game_image/ctrl' / (name + '.brctr')
                          for name in ['PadInfoClassic', 'RaceMessageWindow']]
+    # Unlock pages (Present control/ + NextButton) and the credits pages (MenuOther ending):
+    # staff-roll and movie Fade clips (Hide / Fadein / Show / Fadeout), NextButton's Select/Loop.
+    controller_paths += sorted((UI / 'Present/control/ctrl').glob('*.brctr')) + [UI / 'Present/common/ctrl/NextButton.brctr']
+    controller_paths += sorted((UI / 'MenuOther/ending/ctrl').glob('*.brctr'))
     for path in controller_paths:
         if path.name.startswith('._'):
             continue

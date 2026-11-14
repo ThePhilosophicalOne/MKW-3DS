@@ -5,6 +5,7 @@
 #include "mkw/item_kart_model.hpp"
 #include "mkw/item_rules.hpp"
 #include "mkw/race_item_internal.hpp"
+#include <game/kart/GpRankStats.hh>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -162,6 +163,10 @@ bool RaceItems::strike(unsigned player,int action,unsigned owner,Vec3 direction,
     applyLoss(player,karts_->takeLoss(player));
     if(started<0)return false;
     action=started;
+    // GP rank hit counts: the item object's hit (fn_1_29F1EC / fn_1_29F3B8) credits a valid
+    // owner (fn_1_81508, KartSettings +0x38 +0x08); the victim's count is fn_1_8152C.
+    Kinoko::Kart::GpRankStatsTable::CountHitTaken(player);
+    if(owner<count_)Kinoko::Kart::GpRankStatsTable::CreditHit(owner);
     const ItemEffect effect=action==KartAction::Explosion||action==KartAction::HighLaunch?ItemEffect::Explosion:
         action==KartAction::Launch||action==KartAction::LaunchSpin?ItemEffect::Launch:
         action==KartAction::StarHit||action==KartAction::Knockback||action==KartAction::BulletHit?ItemEffect::Knockback:
@@ -372,15 +377,19 @@ void RaceItems::useLightning(unsigned player){
     // RMCU activateLightning 0x807a91c0: every other racer, through the kart's
     // applyLightning (rank table) and applyLightningEffect gates. Respawning and
     // cannon racers are skipped first (fn_288374).
+    bool struck=false;
     for(unsigned i=0;i<count_;++i){
         if(i==player)continue;const auto& r=racers_[i];
         if(r.damageProtected||r.unavailable||r.inCannon||r.finished)continue;
         // fn_1_288374 restarts the struck racer's bolt (KartEffect +0x4c) whatever the
         // kart's own immunity decides.
         events_.push_back({ItemEffect::Bolt,uint8_t(i),0});
-        shrink(i,lightningShrinkDuration(rank(i),count_),false,false);
+        struck|=shrink(i,lightningShrinkDuration(rank(i),count_),false,false);
         sound(ItemSoundCue::Struck,i);
     }
+    // activateLightning ends with one GP rank hit for the user when a racer was struck
+    // (fn_1_81508).
+    if(struck)Kinoko::Kart::GpRankStatsTable::CreditHit(player);
     // PAL activateLightning 0x807B7C20, after the racers: the global item hit with object
     // type 6 (fn_1_31AEE0 0x8082B294), so the course objects react too (Goombas squash).
     karts_->globalObjectHit(6);
@@ -697,12 +706,16 @@ void RaceItems::afterStep(const ItemRacer* racers,unsigned count,ItemWorldQuery 
     ++frame_;
     for(auto& timer:itemSpawnTimers_)tick(timer);
     if(blooperCaster_<count_&&frame_>=blooperSelectionFrame_){
+        // fn_1_2A1F44: one GP rank hit for the caster when the ink picks any racer (fn_1_81508).
+        bool inked=false;
         for(unsigned i=0;i<count_;++i)if(i!=blooperCaster_&&rank(i)<rank(blooperCaster_)&&!invincible(i)&&!racers_[i].unavailable&&!racers_[i].finished){
+            inked=true;
             // Absolute due frames prevent player update order from changing
             // the source's three-frame per-player staggering.
             inkReadyFrame_[i]=blooperStartFrame_+blooperHitDelay(i);
             hud_[i].inkDelay=uint16_t(inkReadyFrame_[i]-frame_);
         }
+        if(inked)Kinoko::Kart::GpRankStatsTable::CreditHit(blooperCaster_);
         blooperCaster_=MaxRacers;
     }
     updatePow();

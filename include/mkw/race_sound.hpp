@@ -28,6 +28,9 @@ public:
   unsigned racers = 0;
   std::uint32_t graphicsReserve = 2048u * 1024;
   std::array<Racer, 12> racer{};
+  // Demo stages (mode 0xB award / 0xC credits, include/mkw/demo_stage.hpp): the section's
+  // stream starts with the scene (fn_1_201710 0x80711AC4); no race states, countdown or laps.
+  std::uint32_t demoMusic = 0xFFFFFFFFu;
  };
  struct Frame {
   unsigned stage = 0;         // Kinoko RaceManager stage (0 intro .. 4 all finished)
@@ -82,6 +85,9 @@ public:
   void calc();
   void setupActive();          // SetupActiveHandle: course stream track volumes
  };
+ // Demo stages: the SinglePlayer BGM handles (award skip: stop over 30 frames, prepare
+ // and start STRM_O_AWARD_CUT).
+ Bgm& music() { return bgm_; }
 private:
  void setRaceState(int state);
  void applyMusic(const MusicOp& op);
@@ -116,6 +122,7 @@ private:
  float postedPlayer_[11]{};
  SoundTriggers triggers_;      // SoundTriggerMgr and the intro ambience
  bool introLoaded_ = false; int introShot_ = -1;
+ bool birdsPending_ = false;   // the losing scene's SE_DEMO_LOSE_ENV_BIRDS, once the groups are in
  // StreamsMgr (806f52f0 PrepareStreams, 806f5bc4 ChangeStream, 806f54b8 Calc):
  // the active course stream's stem volumes.
  AudioTrack stems_[4]; int stemCount_ = 0; std::uint32_t stemSound_ = 0xFFFFFFFFu; float postedStem_[4]{};

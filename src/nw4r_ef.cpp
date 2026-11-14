@@ -679,8 +679,36 @@ void emitSphere(System& s,Emitter& em,ParticleManager& pm,int count,u32 flags,co
         perRing=nextPer;
     }
 }
+// NW4R EmitterFormCube (form 5; PAL main.dol factory fn_80038030 -> vtable 0x80272590,
+// Emission fn_8003A660, its per-particle EmissionSub fn_8003A320). The sub normalizes the
+// face normal, takes the direction from the origin and the one from the Y axis (each a
+// random [-1, 1) vector when it is zero: |v|^2 <= FLT_MIN), CalcVelocity, then CalcLife and
+// the particle as every form does (emitOne).
+void cubeEmit(System& s,Emitter& em,ParticleManager& pm,Vec3 pos,Vec3 normal,u16 life,float lifeRandom,const Mtx34* space){
+    auto signedRand=[&]{return 2.f*(float(em.random.rand())/65536.f)-1.f;};
+    normalize(normal);
+    Vec3 origin=pos;
+    if(origin.z*origin.z+origin.x*origin.x+origin.y*origin.y<=FltMin){origin.x=signedRand();origin.y=signedRand();origin.z=signedRand();}
+    normalize(origin);
+    Vec3 fromY{pos.x,0.f,pos.z};
+    if(fromY.z*fromY.z+fromY.x*fromY.x<=FltMin){fromY.x=signedRand();fromY.z=signedRand();}
+    normalize(fromY);
+    const Vec3 vel=calcVelocity(em,normal,origin,fromY);
+    emitOne(s,em,pm,pos,vel,life,lifeRandom,space);
+}
+void emitCube(System& s,Emitter& em,ParticleManager& pm,int count,u32 flags,const float* params,u16 life,float lifeRandom,const Mtx34* space){
+    if(count<1)return;
+    CubeForm cube(params,em.prm.velDiffusionEmitterNormal); // Emitter +0x78
+    if(flags&0x20000)return; // the uniform layout (0x8003A7CC-0x8003B570) is not ported
+    for(int i=0;i<count;++i){
+        Vec3 pos,normal;
+        cube.sample(em.random,pos,normal);
+        cubeEmit(s,em,pm,pos,normal,life,lifeRandom,space);
+    }
+}
 void formEmission(System& s,Emitter& em,ParticleManager& pm,int count,u32 flags,const float* params,u16 life,float lifeRandom,const Mtx34* space){
     switch(em.form){
+    case 5:emitCube(s,em,pm,count,flags,params,life,lifeRandom,space);break;
     case 9:emitPoint(s,em,pm,count,life,lifeRandom,space);break;
     case 1:emitLine(s,em,pm,count,flags,params,life,lifeRandom,space);break;
     case 0:emitDisc(s,em,pm,count,flags,params,life,lifeRandom,space);break;

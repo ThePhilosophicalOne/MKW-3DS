@@ -3,6 +3,7 @@
 #include <game/kart/KartObjectManager.hh>
 #include <game/kart/KartMove.hh>
 #include <game/kart/KartState.hh>
+#include <game/kart/GpRankStats.hh>
 #include <game/kart/KartDynamics.hh>
 #include <game/system/RaceManager.hh>
 #include <game/system/CourseMap.hh>
@@ -52,6 +53,8 @@ constexpr int OpeningMin=300,OpeningRange=300,RedistributeEvery=300; // 808c5e80
 constexpr int NormalMin=30,NormalMax[3]={100,120,140}; // 808c5ea2..a8, seconds
 constexpr int AdvantageMin[3]={30,40,50},AdvantageMax[3]={50,60,70}; // 808c5eaa..b4, seconds
 constexpr float AdvantageBonus[3]={8.f,9.f,10.f}; // 808c5eb8
+// PAL 0x808CB3CC: GP rank bonus interval of the speed advantage, -1 = none (50cc).
+constexpr int AdvantageBonusEvery[3]={-1,90,52};
 constexpr float AdvantageDecay=.005f;           // 8089e230
 constexpr float CatchupGapMin=6400.f,CatchupGapMax=12800.f; // 808c5e88, 808c5e8c
 constexpr float CatchupBonus[3]={8.f,10.f,12.f}; // 808c5e90
@@ -471,7 +474,12 @@ void CpuAi::updateRanks(const std::array<unsigned,Capacity>& ranks,const std::ar
         }
         break;}
     case 3: // Speed advantage (fn_1_232E08)
-        if(rmPhase==0){if(rmDuration<rmFrame){if(advantageState==1)advantageState=2;rmPhase=1;}}
+        if(rmPhase==0){if(rmDuration<rmFrame){if(advantageState==1)advantageState=2;rmPhase=1;}
+            // Every AdvantageBonusEvery[class] manager frames (+0x188, 0x808CB3CC) each tracked
+            // human gains one GP rank bonus point (fn_1_814E4, KartSettings +0x34 +0x18),
+            // still on the tick that ends the phase.
+            const int every=AdvantageBonusEvery[engine];
+            if(every>0&&rmFrame%every==0)for(int k=0;k<humanCount;++k)Kart::GpRankStatsTable::AddAiBonus(unsigned(sortedHumans[k]),1);}
         else{for(int k=0;k<cpuCount;++k){auto& s=racers_[sortedCpus[k]].speed;s.advantage=std::max(0.f,s.advantage-AdvantageDecay);}
             if(rmDuration+1200<rmFrame){rmState=2;for(int g=0;g<3;++g)for(int k=0;k<groups_[g].count;++k)racers_[groups_[g].members[k]].rank.offset=0;
                 // Normal-state entry (fn_1_232914) also restarts the top and middle groups
@@ -514,10 +522,10 @@ void CpuAi::drive(unsigned racer){
     uint8_t trick=0;
     const bool bike=kart->isBike();
     if(status.onBit(Kart::eStatus::AirStart)&&status.offBit(Kart::eStatus::JumpPad,Kart::eStatus::InAction)&&
-       int(rand(100))<int(action(r).trick))
+       (setup_.demo||int(rand(100))<int(action(r).trick))) // AIProbabilityDemo::getTrick 0x8072E6BC: 1
         trick=uint8_t(1+rand(bike?4u:2u));
     if(bike&&p.switching){
-        if(p.currParam.setting1==3&&int(rand(100))<int(action(r).wheelie)&&rmState!=3)r.wheelie=true;
+        if(p.currParam.setting1==3&&(setup_.demo||int(rand(100))<int(action(r).wheelie))&&rmState!=3)r.wheelie=true; // demo getWheelie 0x8072E6B4: 1
         if(p.currParam.setting1==4){r.wheelie=false;trick=2;}
         if(r.wheelie)trick=1;
     }
@@ -528,18 +536,21 @@ void CpuAi::drive(unsigned racer){
     // fn_1_6E6E0: speed above 0.55 of the stat base speed (KartMove +0x14).
     if(d.state!=1&&driftHere(p)&&kart->move()->speed()>kart->move()->statBaseSpeed()*.55f&&p.distance<DriftStartDistance){
         // AIProbabilityRace::getDrift(true): one roll per opportunity.
-        if(!r.driftRolled){r.driftRolled=true;if(int(rand(100))<int(action(r).drift)){startDrift=true;driftDir=p.nextParam.curvature>0?-1.f:1.f;}}
+        // AIProbabilityDemo::getDrift (0x8072E6CC) always returns 1, without a roll.
+        if(!r.driftRolled){r.driftRolled=true;if(setup_.demo||int(rand(100))<int(action(r).drift)){startDrift=true;driftDir=p.nextParam.curvature>0?-1.f:1.f;}}
     }else r.driftRolled=false; // getDrift(false) on every other frame re-arms the roll
     const bool switched=p.switching;
     if(switched){
         d.feedForward=FeedForward*p.currParam.curvature;
         if(endDriftHere(p)){endDrift=true;
-            if(!p.currParam.forbidDrift()&&r.canMiniturbo&&int(rand(100))<int(action(r).miniturbo))releaseMiniturbo=true;}
+            // AIProbabilityDemo::getMiniturbo (0x8072E6C4): 1.
+            if(!p.currParam.forbidDrift()&&r.canMiniturbo&&(setup_.demo||int(rand(100))<int(action(r).miniturbo)))releaseMiniturbo=true;}
     }
     d.feedForward+=FeedForwardDecay*(0.f-d.feedForward);
     // AIControlRace::doUpdate (fn_1_2204D4): block line, then doUpdate_: route,
     // obstacle avoider, stuck handler and the kart controller (fn_1_220824).
-    if(!bike&&!r.human)blockUpdate(racer);
+    // The block line belongs to AIControlRace; AIControlDemo (AIControlBase) has none.
+    if(!bike&&!r.human&&!setup_.demo)blockUpdate(racer);
     updatePath(racer,pos);
     avoid(racer);
     if(!r.human)stuckUpdate(racer);
@@ -613,15 +624,16 @@ void CpuAi::drive(unsigned racer){
     // the POW timer reads 46 (fn_1_2A2AF8 == 1, the frame before the third stomp); a pass
     // presses trick Up (AITrickHandler::avoidPow 0x807352F8). Without teams isSameTeam is
     // false for every racer, the POW's user included.
-    if(!r.human&&powTimer_==PowAvoidTimer&&int(rand(100))<PowAvoidChance[std::min(setup_.cpuMode,2u)])trick=1;
+    if(!r.human&&!setup_.demo&&powTimer_==PowAvoidTimer&&int(rand(100))<PowAvoidChance[std::min(setup_.cpuMode,2u)])trick=1;
     r.command={buttons,stick,trick,animationStick,d.lean};
 }
 
 void CpuAi::step(uint32_t driveMask,const std::array<unsigned,Capacity>& ranks,const std::array<unsigned,Capacity>& laps,
                  const std::array<bool,Capacity>& finished,unsigned finalLap){
-    if(!route_)return;
+    if(!route_)return; // loser_demo has no ENPT: the losing kart stays on KTPT 0
     auto* manager=System::RaceManager::Instance();
     ++frame_;obstaclesValid_=false;
+    if(setup_.demo){stepDemo(driveMask);return;}
     updateRanks(ranks,laps,finished,finalLap);
     const bool racing=manager->isStageReached(System::RaceManager::Stage::Race);
     for(unsigned i=0;i<setup_.count;++i){
@@ -672,6 +684,28 @@ void CpuAi::step(uint32_t driveMask,const std::array<unsigned,Capacity>& ranks,c
         driveFinished_=finished[i];
         drive(i);
         if(!r.human){r.item.goal=r.item.goal||finished[i];stepItems(i);}
+    }
+}
+
+// ---- Demo stages (Enemy::AIControlDemo, PAL ctor 0x8072DFD0, vtable 0x808CA2E4) ----
+// init (0x8072E348) takes the route-following state when cameraMode is 7 (the winning run)
+// or gameMode is 0xC (the credits run); stateRun (0x8072E4D8) runs the AIControlBase update
+// (route, obstacle avoider, stuck handler, kart controller) and then writes the current ENPT
+// point's setting1 into KartMove +0x20, the kart speed, every frame. AIProbabilityDemo
+// (0x8072E6A4..0x8072E6DC) answers drift, mini-turbo, trick and wheelie with 1 and the start
+// boost with level 0. No AIRankManager, no items, no block line, no laps or checkpoints.
+void CpuAi::stepDemo(uint32_t driveMask){
+    auto* manager=System::RaceManager::Instance();
+    const bool racing=manager->isStageReached(System::RaceManager::Stage::Race);
+    for(unsigned i=0;i<setup_.count;++i){
+        auto& r=racers_[i];if(!r.active||!((driveMask>>i)&1))continue;
+        auto* kart=Kart::KartObjectManager::Instance()->object(i);
+        if(!r.startDecided){r.startDecided=true;r.startBoost=0;kart->state()->setStartBoostIdx(0);}
+        r.itemCommand={};
+        if(!racing){updatePath(i,native(kart->pos()));r.command={};continue;}
+        driveFinished_=false;
+        drive(i);
+        kart->move()->setSpeed(float(route_->point(r.path.cur).setting1));
     }
 }
 

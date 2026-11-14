@@ -2,6 +2,7 @@
 #include <mkw/math.hpp>
 #include <mkw/cpu_speed.hpp>
 #include <mkw/cpu_ai.hpp>
+#include <mkw/save_store.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -40,7 +41,14 @@ public:
         unsigned raceNumber=0;    // 0: the first race of the Grand Prix / VS set
         std::array<uint16_t,Capacity> points{}; // every racer's points before this race
         bool newLineup=true;      // a new set from the menus: draw the CPU racers again
+        // Each racer's grid slot 1..count (Raceinfo_construct 0x805327A0: race scenario
+        // prevFinishPos +0xE1). 0 everywhere = index + 1 (battle, Time Trials, QA).
+        // mkw::gpFirstRaceGrid for race 1, then the previous race's finishing positions.
+        std::array<uint8_t,Capacity> startPositions{};
         uint32_t seed=1;          // the menus' Util::Random seed (retail: the OS time)
+        // The active licence's unlock flags (unlock::flagsOf): CPUs never take a locked
+        // character (fn_1_32E874 0x8083EC28) or vehicle (fn_1_3370A8 0x8084745C).
+        UnlockWords unlocks{};
     };
     void setSession(const Session& session){session_=session;lineupPending_|=session.newLineup;}
     // Call within the RaceConfig init callback. Count=1 keeps a solo race.

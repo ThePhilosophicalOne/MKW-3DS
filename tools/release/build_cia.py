@@ -22,7 +22,7 @@ HERE=Path(__file__).parent
 sys.path[:0]=[str(ROOT/'tools'),str(HERE)]
 SD='sd-card/3ds/mkw-3ds'
 DISC_MANIFEST=json.loads((HERE/'usa-disc.json').read_text())
-MENU_ARCHIVES=['MenuSingle','MenuSingle_U','MenuOther','MenuOther_U','Title','Title_U','Award','Award_U','Globe']
+MENU_ARCHIVES=['MenuSingle','MenuSingle_U','MenuOther','MenuOther_U','Title','Title_U','Award','Award_U','Globe','Present','Present_U']
 COURSE_OVERLAY_IDS=['1','5','7','8','10','15','19','27','29','31']
 
 # (name, command, outputs that mean the step is done). {py} is this Python,
@@ -37,6 +37,8 @@ COOK_STEPS=[
  ('BRRES exporters',['node','tools/bundle_cooker.mjs'],['build/export_brres.mjs']),
  # The game module, read as data (menu palettes, layouts, animation tables).
  ('game module',['{py}','tools/extract_disc.py','{disc}','data/extracted','--file','rel/StaticR.rel','--to','build/itembox-retail.rel'],['build/itembox-retail.rel']),
+ # Unlock rules, expert-ghost times, staff-roll timelines (numbers only) from the REL.
+ ('unlock tables',['{py}','tools/cook_unlock_tables.py'],['include/mkw/unlock_tables.hpp']),
  ('menus, movies and sound',['{py}','tools/extract_disc.py','{disc}','data/extracted','--prefix','Scene/','--prefix','thp/','--prefix','sound/','--prefix','Boot/'],['data/extracted/Scene/UI/Title.szs','data/extracted/sound/revo_kart.brsar','data/extracted/thp/title','data/extracted/Boot/Strap/us/English.szs']),
  # Coconut Mall's sky predates the course importer, which reuses it (README.txt).
  ('Coconut Mall archive',['{py}','tools/unpack_szs.py','data/extracted/Race/Course/shopping_course.szs','assets/coconut-mall'],['assets/coconut-mall/vrcorn_model.brres']),
@@ -68,6 +70,7 @@ COOK_STEPS=[
  ('Lakitu',['{py}','tools/cook_lakitu.py'],['build/vfx/models/lakitu_body.dskm']),
  ('award ceremony',['{py}','tools/cook_ceremony.py','{disc}'],[SD+'/models/ceremony.json']),
  ('battle and award screens',['{py}','tools/cook_battle.py'],[SD+'/models/battle.json']),
+ ('award screens',['{py}','tools/cook_award_ui.py'],['build/award-ui/award-ui.json']),
  ('effect archives',['{py}','tools/cook_effect_archives.py'],[SD+'/models/effect-archives.json']),
  ('name balloons',['{py}','tools/cook_race_balloon.py'],['build/vfx/textures/hud_balloon_line.t3x']),
  ('race flow and results',['{py}','tools/cook_race_flow.py'],['build/race-flow/textures/flow_wipe.t3x']),
@@ -82,6 +85,8 @@ COOK_STEPS=[
  ('menu lighting',['{py}','tools/cook_menu_lighting.py'],['include/mkw/menu_lighting.hpp','build/menu-lighting.json']),
  ('menu models',['{py}','tools/cook_menu_models.py','--machines','--jobs','{jobs}'],[SD+'/models/menu-models.json']),
  ('menu movies',['{py}','tools/cook_menu_movies.py','--jobs','{jobs}'],[SD+'/models/menu-movies.json',SD+'/movies/title.wav']),
+ # Credits part 2: thp/ending/ending_normal.thp, ending_true.thp and their audio.
+ ('credits movies',['{py}','tools/cook_credits.py','--jobs','{jobs}'],[SD+'/models/credits.json',SD+'/movies/ending_normal.wav',SD+'/movies/ending_true.wav']),
  ('menu audio',['{py}','tools/cook_menu_audio.py'],[SD+'/models/menu-audio.json']),
  ('race bottom screen',['{py}','tools/cook_race_map.py','--jobs','{jobs}'],['build/race-map/textures/race_minimap_ui.t3x']),
  # The SD build's archives index the finished package, so they come last.

@@ -65,7 +65,7 @@ const char* uiFocusControlName(const MenuState& state,unsigned slot){
  if(slot>=state.count())return "";
  switch(state.page){
  case UiPage::License:return slot<2?"LicenseSelectT":"LicenseSelectB";
- case UiPage::MainMenu:return slot==0?"TopMenuSingle":slot<4?"TopMenuMulti":slot<6?"TopMenuWifi":"TopMenuChannel";
+ case UiPage::MainMenu:return slot==0?"TopMenuSingle":slot<4?"TopMenuMulti":slot<6?"TopMenuWifi":slot==7?"FileAdmin":"TopMenuChannel";
  case UiPage::Mode:return "SingleTop";
  case UiPage::EngineClass:return "ClassSelect2";
  case UiPage::VSMode:return "VSSelect";
@@ -82,6 +82,11 @@ const char* uiFocusControlName(const MenuState& state,unsigned slot){
  case UiPage::Pause:return uiPauseMenuControl(state);
  case UiPage::QuitConfirm:return uiPauseMenuControl(state); // AfterMenuEndConfirm's animations (menu_ui.cpp)
  case UiPage::Error:case UiPage::NoGhosts:return "ConfirmOK";
+ // Save and licence pages (Release 1).
+ case UiPage::LicenseCreateConfirm:case UiPage::LicenseMiiMissing:case UiPage::LicenseErased:return "ConfirmOK";
+ case UiPage::SaveError:case UiPage::LicenseMiiConfirm:case UiPage::LicenseErase:return "YesNoButton";
+ case UiPage::LicenseSettings:return "LicenseManagementButton";
+ case UiPage::Records:return "NextRecordButton";
  default:return "";
  }
 }

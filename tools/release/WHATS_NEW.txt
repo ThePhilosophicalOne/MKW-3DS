@@ -1,16 +1,10 @@
 ThePhilosophicalOne fork (in progress)
 REBUILD NEEDED: new game files
-Menus load faster; character and
-  vehicle switching is instant
-Menu music: retail start and layers
-Title screen + pause: retail art,
-  Classic Controller diagram
-Blooper, Bob-omb, POW, Thunder Cloud
-  and Mushroom animations
-Animated course textures and skies,
-  retail lava and shiny materials
-Maple Treeway leaf piles burst
-Lightning thunder no longer cut off
-Name balloons: retail timing
-Wario Bike handlebar fixed
-New object sounds; Goomba Mushrooms
+Grand Prix complete: rank, award
+  ceremony, podium, fireworks
+Save file with licences and Miis;
+  v0.7.0 best times carried over
+Unlocks as on the Wii: racers,
+  karts, bikes, cups, Mirror
+Credits and both endings
+CPUs race only unlocked racers

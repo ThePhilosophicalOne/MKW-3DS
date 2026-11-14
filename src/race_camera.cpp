@@ -215,6 +215,8 @@ bool RaceCameraCourse::load(const void* data,std::size_t size){
     if(cam.type==0&&goalCamera<0)goalCamera=int(cameras.size());
     cameras.push_back(cam);
    }
+   // KMP::Manager::Init: CourseMap +0x48 = getCamera(the section header's extra byte).
+   if(k[at+6]<count)openingCamera=int(k[at+6]);
   }else if(!std::memcmp(k+at,"AREA",4)){
    if(at+8+count*0x30>size)return false;
    for(unsigned a=0;a<count;++a){const auto* e=k+at+8+a*0x30;areaCamera.push_back(e[1]==0&&e[2]!=0xff?int(e[2]):-1);}
@@ -578,5 +580,48 @@ void RaceCameraDirector::stepAuto(const RaceCameraInput& in){
   if(a.dist<300.f)a.dist=300.f;
   a.prevEye=view_.eye;
  }
+}
+
+// fn_1_9B1C8 (PAL 0x805AB57C) in mode 1 (+0x4C == 1): the first call switches to the start
+// camera (fn_1_9B9E0) and runs the mode-1 update in the same frame.
+void RaceCameraDirector::stepChain(const RaceCameraInput& in){
+ auto& a=auto_;
+ if(!course_)return;
+ if(a.chainStart>=0){
+  const int start=a.chainStart;a.chainStart=-1;
+  if(start<int(course_->cameras.size()))switchCamera(in,start,false);
+ }
+ if(a.camera<0)return;
+ // Time +1.0 (lbl_1_rodata_2D5C); at the camera's time it restarts at 0 and, unless the chain is
+ // over, the next camera starts.
+ a.elapsed+=1.f;
+ if(course_->cameras[a.camera].time<=a.elapsed){
+  a.elapsed=0;
+  if(!a.chainDone){
+   const unsigned next=course_->cameras[a.camera].next;
+   if(next<course_->cameras.size())switchCamera(in,int(next),false);else a.chainDone=true;
+  }
+ }
+ updateAction(in);
+ // fn_1_9999C and fn_1_9A954, as stepAuto.
+ const auto& c=course_->cameras[a.camera];
+ if(c.fovSpeed){
+  float low=c.fovStart,high=c.fovEnd,sign=1;if(high<low){std::swap(low,high);sign=-1;}
+  a.fov=std::clamp(a.fov+.01f*sign*float(c.fovSpeed),low,high);
+ }else a.fov=c.fovStart;
+ view_.fov=a.fov;
+ if(a.type==3||a.type==6){
+  Vec3 push;bool wall=false;
+  if(in.spherePush&&in.spherePush(65.f,view_.eye,a.prevEye,push,wall)){
+   view_.eye=view_.eye+push;
+   a.dist=length(view_.eye-view_.target);
+   if(wall&&a.dist<300.f){a.pitch+=.5f;if(a.pitch>60.f)a.pitch=60.f;}
+  }
+  a.pitch+=.03f*(0.f-a.pitch);
+  a.dist=a.dist<=2.f*a.distTarget?a.dist+.05f*(a.distTarget-a.dist):a.distTarget;
+  if(a.dist<300.f)a.dist=300.f;
+  a.prevEye=view_.eye;
+ }
+ calcUp(in,false,.1f);
 }
 }

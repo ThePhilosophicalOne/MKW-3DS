@@ -42,7 +42,9 @@ public:
   void setVolume(float to, int over) { if (to == value) value += 0.01f; set(to, over); }
   bool calc() { if (!frames) return false; if (--frames == 0) value = target; else value -= step; return true; }
  };
- enum class Section : std::uint8_t { None, Title, Single, Race };
+ // Unlock: sections 0x90-0x93 (BGM STRM_O_LEVEL_OPEN_FAN); Credits: 0x39-0x3E (the demo
+ // stage plays STRM_O_ENDING_PART_A, the movie its own audio, Congratulations none).
+ enum class Section : std::uint8_t { None, Title, Single, Race, Unlock, Credits };
  static Section sectionOf(UiPage page);
  // Section_GetAudioStreamIdx (USA 80601300) for the page's retail page id.
  static int layerOf(UiPage page);
@@ -51,6 +53,7 @@ private:
  void startBgm();
  void pageLayer(UiPage page, int state);
  Section section_ = Section::None, loaded_ = Section::None;
+ unsigned unlockBit_ = ~0u;   // the reward of the unlock section playing the fanfare
  int pendingStart_ = -1;
  // MenuRSARPlayer +4: the last page whose layer OnNewPageLayer applied in this
  // section (a new player leaves it unset); StartSound picks the stems from it.

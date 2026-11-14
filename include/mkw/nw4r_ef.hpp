@@ -6,6 +6,7 @@
 // Presentation only: nothing here feeds race or replay state.
 #include "mkw/math.hpp"
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -52,6 +53,79 @@ struct Random {
     void srand(u32 s){seed=s;}
     u32 rand(){seed=seed*0x343fdu+0x269ec3u;return seed>>16;}
     float randFloat(){return float(rand())/65536.f;}
+};
+
+// Emitter form 5, the cube (NW4R EmitterFormCube::Emission, PAL fn_8003A660; host-tested in
+// tools/tests/gp_end.cpp): one particle's position and face normal per sample(), the random
+// stream in retail order. params: half sizes x, y, z (at least 1e-5, no fabs), params[3] the
+// hollow percentage (0 means 1e-5). The uniform layout (flag 0x20000) is not ported: no MKWii
+// emitter uses it (tools/cook_race_effects.py refuses it).
+struct CubeForm {
+    static constexpr float MinSize=9.999999747378752e-06f;
+    float sx,sy,sz,hollow,solid,diffusion;
+    float a=0.f,b=0.f,c=0.f; // the unit coordinates, kept between particles like the registers
+    CubeForm(const float* params,float velDiffusionEmitterNormal)
+        :sx(params[0]<MinSize?MinSize:params[0]),sy(params[1]<MinSize?MinSize:params[1]),sz(params[2]<MinSize?MinSize:params[2]),
+         hollow(params[3]==0.f?MinSize:0.01f*params[3]),solid(1.f-hollow),diffusion(velDiffusionEmitterNormal){
+        // 0x8003A79C: keep the diffusion off pi (0x80387960).
+        const float d=diffusion-3.1415927410125732f;
+        if((d<0.f?-d:d)<3.7450702e-07f)diffusion-=3.7450702e-07f;
+    }
+    template<class T> static T abs(T v){return v<T(0)?-v:v;}
+    void sample(Random& r,Vec3& pos,Vec3& normal){
+        auto signedRand=[&]{return 2.f*(float(r.rand())/65536.f)-1.f;};
+        auto shell=[](float v){return v>=0.f?1.f-v:-1.f-v;};
+        if(hollow==0.f){
+            a=signedRand();b=signedRand();c=signedRand();
+        }else if(hollow==1.f){
+            switch(r.rand()%6){ // a face
+            case 0:c=1.f;a=signedRand();b=signedRand();break;
+            case 1:c=-1.f;a=signedRand();b=signedRand();break;
+            case 2:b=1.f;a=signedRand();c=signedRand();break;
+            case 3:b=-1.f;a=signedRand();c=signedRand();break;
+            case 4:a=1.f;b=signedRand();c=signedRand();break;
+            default:a=-1.f;b=signedRand();c=signedRand();break;
+            }
+        }else{
+            // 0x8003B8E0: one of three slabs of the shell by volume (|y|, then |z|, then |x|
+            // outside the hollow core), the products in retail's order.
+            const float t1=sx*solid,sxy=sx*sy;
+            const float t0=sy*t1;
+            float v2=hollow*sxy,v0=solid*sxy;
+            const float t2=hollow*t0;
+            v2=sz*v2;v0=sz*v0;
+            const float v1a=solid*v2,t3=sz*t2;
+            const float v1=v0+v1a,v2b=hollow*t3;
+            const float u=float(r.rand())/65536.f;
+            const float pick=(v2b+v1)*u;
+            if(pick<v0){a=signedRand();b=shell(solid*signedRand());c=signedRand();}
+            else if(pick<v1){a=signedRand();b=hollow*signedRand();c=shell(solid*signedRand());}
+            else{a=shell(solid*signedRand());b=hollow*signedRand();c=hollow*signedRand();}
+        }
+        // 0x8003BB54: the dominant coordinate's axis.
+        Vec3 n{0.f,0.f,0.f};
+        if(b>=0.f&&b>=abs(a)&&b>=abs(c))n.y=1.f;
+        else if(b<0.f&&-b>=abs(a)&&-b>=abs(c))n.y=-1.f;
+        else if(a>=0.f&&a>=abs(b)&&a>=abs(c))n.x=1.f;
+        else if(a<0.f&&-a>=abs(b)&&-a>=abs(c))n.x=-1.f;
+        else if(c>=0.f)n.z=1.f;
+        else n.z=-1.f;
+        pos={a*sx,b*sy,c*sz};
+        if(diffusion!=0.f){
+            // 0x8003BC8C: the normal leans toward the position, axis = off-axis length /
+            // tan(larger off-axis coordinate * diffusion).
+            auto lean=[&](float u,float v){
+                const float m=abs(u)>abs(v)?abs(u):abs(v);
+                const float inv=1.f/float(std::tan(double(m*diffusion)));
+                const float l2=u*u+v*v;
+                return inv*(l2<=0.f?0.f:std::sqrt(l2));
+            };
+            if(n.x!=0.f){const float k=lean(pos.y,pos.z);n={n.x*k,pos.y,pos.z};}
+            else if(n.y!=0.f){const float k=lean(pos.x,pos.z);n={pos.x,n.y*k,pos.z};}
+            else{const float k=lean(pos.x,pos.y);n={pos.x,pos.y,n.z*k};}
+        }
+        normal=n;
+    }
 };
 
 enum LifeStatus:u8 {Closed,Active,Wait,Closing};

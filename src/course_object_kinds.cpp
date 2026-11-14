@@ -833,6 +833,15 @@ void drawStarRing(ObjectDraw& d,Visual& v){
     a.clip=ring.shot()?v.clips[0]:v.clips[1];a.frame=ring.animFrame();
     d.submit(v.main.model,v.placement,a);
 }
+// The award scene's Lakitu (DemoJugemu 0x2DB; load fn_1_24E490 0x8075E844 registers the CHR0
+// "o_jg-demowin" as anim 0, calc fn_1_24E5D8 0x8075E98C plays it from frame 0 at rate 1 on the
+// camera cut, CameraManager +0x25). Until then the model rests in its bind pose; the clip does
+// not loop and holds its last frame. CourseObjects::startDemoLakitu records the cut's tick.
+void drawDemoJugemu(ObjectDraw& d,Visual& v){
+    Anim a;
+    if(v.lastState==1&&d.tick>=v.stateTick){a.clip=v.clips[0];a.frame=float(d.tick-v.stateTick);}
+    d.submit(v.main.model,v.kinetic&&v.object?liveMatrix(*v.object):v.placement,a);
+}
 bool hidden(const Visual& v,int course){
     // Effects, sound sources and triggered splashes have no idle model; item
     // boxes are race items. Coconut Mall keeps its validated palm/escalator path.
@@ -858,6 +867,7 @@ bool classifyObject(Visual& v,const ObjectAssets& assets,int course){
     const bool live=v.object!=nullptr;
     if(classifyMover(v,assets))return true;
     if(named(v,"DonkyCannon_wii")||named(v,"DonkyCannonGC")||named(v,"tree_cannon")){v.present=drawDonkyCannon;return true;}
+    if(v.geo->id()==0x2DB){v.present=drawDemoJugemu;v.clips[0]=clip(v.main,"o_jg-demowin");v.low=v.shadow={};v.lastState=-1;return true;}
     if(id==ObjectId::Kuribo&&live){
         v.present=drawKuribo;v.clips[0]=clip(v.main,"walk_l");
     }else if(id==ObjectId::Wanwan&&live){

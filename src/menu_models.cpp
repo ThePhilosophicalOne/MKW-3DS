@@ -99,6 +99,18 @@ namespace mkw
         Wanted wanted(const MenuState &state)
         {
             Wanted w;
+            // Unlock page 0xCD (fn_1_34478C PAL 0x80854B40): CharacterSelectModel with the
+            // character, or MachineSelectModel with the vehicle and its fixed driver. A Mii
+            // has no model in this port.
+            if (state.page == UiPage::Unlock)
+            {
+                const auto &n = state.unlockPage.notice();
+                const int driver = n.modelCharacter >= 0 && !unlock::isMii(unsigned(n.modelCharacter)) ? uiCharacterIndex(unsigned(n.modelCharacter)) : -1;
+                w.driverFull = n.modelVehicle >= 0;
+                w.driver = driver >= 0 && driver < 24 ? driver : -1;
+                w.machine = w.driverFull && w.driver >= 0 ? w.driver * 12 + int(uiVehicleChoice(unsigned(n.modelVehicle))) : -1;
+                return w;
+            }
             w.driverFull = machinePage(state.page);
             w.driver = state.page == UiPage::Character ? int(state.characterDriver(state.cursor)) : machinePage(state.page) ? int(state.selection.driver)
                                                                                                                             : -1;

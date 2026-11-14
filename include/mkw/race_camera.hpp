@@ -60,6 +60,7 @@ struct RaceCameraCourse {
  std::vector<int> areaCamera;   // AREA index -> CAME index (camera areas, else -1)
  std::vector<Route> routes;
  int goalCamera=-1;             // CourseMap +0x44: first CAME of type 0
+ int openingCamera=-1;          // CourseMap +0x48: the CAME header's first extra byte
  bool load(const void* kmp,std::size_t size);
 };
 
@@ -128,6 +129,15 @@ public:
  void holdEye(const RaceCameraInput& in);
  void endStep(const RaceCameraInput& in);
  void step(const RaceCameraInput& in){if(beginStep(in)){holdEye(in);endStep(in);}}
+ // The demo stages' race camera: AutoCameraMoverRace in its chain mode (fn_1_9B1C8, PAL
+ // 0x805AB57C, mode 1 set by fn_1_99BA0). The first stepChain switches to `camera` (the
+ // course's openingCamera, CourseMap +0x48); each camera then runs while its time (+1.0 a
+ // frame) is below its `time`; at the end the time restarts at 0 and its `next` starts
+ // (fn_1_6920, fn_1_9B9E0). Without a next the chain is over (+0x50, chainFinished) and the
+ // last camera's action keeps running without a restart.
+ void startChain(int camera){auto_=Auto{};auto_.chainStart=camera;resetUp();}
+ void stepChain(const RaceCameraInput& in);
+ bool chainFinished()const{return auto_.chainDone;}
  Vec3 target()const{return target_;}  // RaceCamera +0xac
  RaceCameraView view()const{return view_;}
  Mode mode()const;
@@ -152,6 +162,7 @@ private:
   Vec3 forward{0,0,1},prevEye,viewOffset,savedTarget;float viewDistance=0;
   unsigned hold=0,fixFrames=0;
   bool done=false,suppress=false;
+  int chainStart=-1;bool chainDone=false; // stepChain: the camera to start, +0x50
   CameraRail rail;
  };
  void computeTarget(const RaceCameraInput& in,bool snap,Vec3 pivot);

@@ -183,6 +183,9 @@ void RaceSound::begin(const Setup& s) {
  bgm_ = Bgm{};
  triggers_.reset(s.course, s.mirror);
  introLoaded_ = false; introShot_ = -1;
+ // The losing scene (section 0x35 with cameraMode 0xC; in the port loser_demo, course 0x38,
+ // is the stage of exactly that case): fn_1_1EF700 starts its birds once GRP_RACE is in.
+ birdsPending_ = s.demoMusic != None && s.mode == 0xB && s.course == 0x38;
  for (auto& t : stems_) t = AudioTrack{};
  stemCount_ = 0; stemSound_ = 0xFFFFFFFFu;
  bgmValue_ = AudioTrack{}; bgmValue_.value = bgmValue_.target = 1;
@@ -197,6 +200,14 @@ void RaceSound::begin(const Setup& s) {
  // at full volume, every other player from silence over 120 frames.
  for (int p = 0; p < 11; ++p) { players_[p].value = p < 2 ? 1.0f : 0.0f; players_[p].set(1.0f, p < 2 ? 0 : 0x78); postedPlayer_[p] = -1; }
  race_ = Track{};
+ if (s.demoMusic != None) {
+  // Demo stages (game mode 0xB / 0xC): the section stream plays from the scene start
+  // (race RSAR fn_1_201710 0x80711AC4); no race state runs, so no fanfare, countdown,
+  // lap or goal sound (countdown_ 4 = done).
+  countdown_ = 4; state_ = 1;
+  bgm_.play(s.demoMusic, 0);
+  trace("demo music", s.demoMusic);
+ } else
  // RaceMgr::Init (80708f5c): the intro section's state (2), or the race
  // section's (3) when there is no course preview.
  setRaceState(s.preview ? 2 : 3);
@@ -221,6 +232,11 @@ void RaceSound::planScene() {
  std::vector<std::uint32_t> groups{id::group::GRP_CMN, id::group::GRP_RACE}, resident, onDemand;
  const unsigned course = s.course;
  if (course < 0x2a) groups.push_back(course + 0xf);
+ // The award section (game mode 0xB): every award scene sound (SE_DEMO_*, the demo crowds'
+ // SE_CC_AWARD_AUD) is in GRP_AWARD_DEMO only (revo_kart.brsar group 8: BNK_AWARD_DEMO 658,
+ // BNK_AWARD_DEMO_BIRDS 661 and the crowd bank 454).
+ const bool awardDemo = s.demoMusic != None && s.mode == 0xB;
+ if (awardDemo) groups.push_back(id::group::GRP_AWARD_DEMO);
  std::vector<std::uint32_t> voiceGroups;
  bool vehicles[36] = {};
  for (unsigned i = 0; i < s.racers && i < s.racer.size(); ++i) {
@@ -283,6 +299,7 @@ void RaceSound::planScene() {
  scene.residentSounds = must.data(); scene.residentSoundCount = int(must.size());
  scene.keepMs = 400;
  resident = {id::group::GRP_CMN, id::group::GRP_RACE};
+ if (awardDemo) resident.push_back(id::group::GRP_AWARD_DEMO);
  if (course < 0x2a) resident.push_back(course + 0xf);
  for (unsigned i = 0; i < s.racers; ++i) if (s.racer[i].local && s.racer[i].character < 24) resident.push_back(std::uint32_t(VoiceGroup[s.racer[i].character]));
  // The course stream and the next one (prepared) play from block rings.
@@ -638,6 +655,9 @@ void RaceSound::step(const Frame& f, RaceAudioFrame* actors) {
   if (introShot_ >= 0 && f.introShot > introShot_) triggers_.intro();
  }
  introShot_ = f.introShot;
+ // fn_1_1EF700 (PAL 0x806FFAB4), on GRP_RACE's load in sections 0x35-0x38 with cameraMode 0xC:
+ // SE_DEMO_LOSE_ENV_BIRDS on the race 2D SE handle (fn_1_1EC7EC 0x806FCBA0), once.
+ if (birdsPending_ && !planPending_ && sys.sceneReady()) { birdsPending_ = false; sys.play(id::SE_DEMO_LOSE_ENV_BIRDS); trace("birds", id::SE_DEMO_LOSE_ENV_BIRDS); }
  // KartActor::ApplyKCLSoundTrigger (807021a0): the local racer's sound zone.
  if (actors && !finished_)
   for (int i = 0; i < actors->karts && i < 12; ++i) {

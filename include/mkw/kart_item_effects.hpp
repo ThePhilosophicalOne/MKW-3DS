@@ -1,5 +1,6 @@
 #pragma once
 #include "mkw/race_effects.hpp"
+#include "mkw/gp_rank_runtime.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -405,6 +406,9 @@ private:
     void wallHit(const KartFxInput& in,KartFxSink& sink){
         if(!in.beforeRespawn&&wallContacts_>0&&length(in.velocity)>30.f&&hitFrames_[WallHit]>HitGap){
             hitFrames_[WallHit]=0;
+            // The same hit counts toward the Grand Prix rank (fn_1_81498 0x8059184C; ghosts
+            // never reach here).
+            gpCountWallHit(index_);
             if(local_){
                 auto f=pose(in);float scale=1;if(effectScale(in,scale))f.scale=scale;
                 if(sink.alive(KartFx::CollisionHit))sink.kill(KartFx::CollisionHit);

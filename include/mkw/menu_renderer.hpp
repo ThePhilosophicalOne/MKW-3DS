@@ -27,6 +27,15 @@ public:
  void uploadMovies();
  bool moviesFinished() const;
  bool hasMovies() const;
+ // Credits part 2 (credits.hpp): the ending movie (movies/ending_*.gmv), drawn into
+ // quads whose movie is UiCreditsMovie. open starts asynchronous opening (no loop);
+ // stream selects the frame for the movie's own 60 Hz clock (uploadMovies copies it);
+ // started: its first frame is on screen; finished: the last frame has been shown.
+ bool openCreditsMovie(const char* path);
+ void streamCreditsMovie(std::uint64_t elapsed60HzTicks);
+ bool creditsMovieStarted() const;
+ bool creditsMovieFinished() const;
+ void closeCreditsMovie(Renderer&);
  // Synchronous residency (outside a frame, GPU already drained).
  bool needsPrepare(const std::vector<UiQuad>&,bool stableClock=true) const;
  bool prepare(const std::vector<UiQuad>&,bool stableClock=true);

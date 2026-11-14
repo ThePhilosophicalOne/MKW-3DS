@@ -291,6 +291,174 @@ def bake_late(menu_messages,labels,text_styles,text_unique,late_race_roles):
      else:record=save(key,styled,font);unique[pixel_hash]=record
      record.update(text=label,font=font_id,style=pane['textStyle'])
 
+# Save file and licence pages (Release 1, findings/r1_save_plan.md). Run after
+# bake_late, so every earlier sprite, panel and text style keeps its index.
+# Retail: create-save busy page 0x4F (BMG 0x811), corrupt / cannot-save pages
+# 0x03 / 0x04 with page 0x53 (MessageWindow, YesNoButton Option0/Option1), LicenseSelectPage
+# 0x65 occupied cards (common_w076_license_icon_tex_top/bottom), ConfirmPage
+# 0x52, LicenseDisplayPage 0x66, LicenseManagementPage 0x67 (MenuOther
+# LicenseManagementButton: Record, ChangeMii, Delete), LicenseDeletePage 0x68.
+# Messages carry the player's Mii name, so they are drawn at runtime from a
+# kart_kanji_font glyph atlas (BRFNT CWDH spacing) in their panes' text styles.
+SAVE_MESSAGE_IDS=[0x7d0,0x7df,0x7eb,0x805,0x807,0x80b,0x80c,0x811,0x814,0x817,0x81a,0x835,0x836,0x837,0x838,0x83f,0x840,
+                  0x848,0x849,0x84a,0x84b,0x850,0x857,0x867,0x868,0x869,0x86b,0x898,0x89d,0xd53,0xd54,0xd55,0xd56,
+                  *range(0xd2d,0xd36),0x1b5b,*range(0x2008,0x200d),*range(0x2012,0x202a),*range(0x2044,0x205c),
+                  # Common.bmg name messages of the favourites (fn_1_3233C0 / 32312C / 3232B4 / 323380).
+                  *range(0x2328,0x2341),*range(0x238c,0x239e),*range(0x23be,0x23d0),*range(0x2454,0x2474),*range(0x24b8,0x24c2),
+                  # Unlock pages (fn_1_34445C / fn_1_344A4C / fn_1_3443A0, include/mkw/unlocks.hpp): headlines,
+                  # condition texts, the play count, cup names (fn_1_323284) and the Mii outfits (fn_1_3233C0).
+                  *range(0x1f40,0x1f4c),*range(0x1fa4,0x1fa9),*range(0x1fae,0x1fc2),*range(0x1fcc,0x1fe5),*range(0x23f0,0x23f8),0x235c,0x235d,
+                  # MenuOther_U StaffRoll.bmg: the staff-roll templates and every entry (include/mkw/unlock_tables.hpp).
+                  *range(0x22c4,0x22c7),*range(0x22ce,0x2322),
+                  # EndingCloseBG's "CONGRATULATIONS!" (its brctr message, MenuOther_U Menu.bmg).
+                  0x1e16]
+def save_messages(path):
+ """BMG text with its group-2 parameters as markers: the player or Mii name
+ (types 0x0000 / 0x0012) U+0001, integer parameter n (type 0x0010) U+0002+n,
+ a nested message (type 0x0011) U+0004 (argument 0) / U+0005 (argument 1), a picture-font
+ glyph (group 1) as itself, the text colour (group 0, type 1) U+E000+colour.
+ Other commands are skipped."""
+ d=path.read_bytes();offset=32;blocks={}
+ for _ in range(struct.unpack_from('>I',d,12)[0]):
+  size=struct.unpack_from('>I',d,offset+4)[0];blocks[d[offset:offset+4]]=offset;offset+=size
+ info,strings=blocks[b'INF1'],blocks[b'DAT1']+8
+ count,stride=struct.unpack_from('>HH',d,info+8);result={}
+ for index in range(count):
+  at=strings+struct.unpack_from('>I',d,info+16+index*stride)[0];chars=[]
+  while at+2<=len(d) and d[at:at+2]!=b'\0\0':
+   if d[at:at+2]==b'\0\x1a':
+    size=d[at+2]
+    if size<4:raise ValueError('Invalid BMG control command')
+    kind=struct.unpack_from('>H',d,at+4)[0] if size>=6 else -1
+    if d[at+3]==2 and kind in (0,0x12):chars.append('\x01')
+    elif d[at+3]==2 and kind==0x10 and size>=8:chars.append(chr(2+min(struct.unpack_from('>H',d,at+6)[0],1)))
+    elif d[at+3]==2 and kind==0x11:chars.append('\x05' if size>=8 and struct.unpack_from('>H',d,at+6)[0]==1 else '\x04')
+    # Group 0, type 1: the text colour (fn_1_BF430 PAL 0x805CF7E4), drawn by menu_ui.cpp runText.
+    elif d[at+3]==0 and kind==1 and size>=8:chars.append(chr(0xe000+min(struct.unpack_from('>H',d,at+6)[0],0xff)))
+    # Group 1, kind 0: one picture-font glyph (the rank stars and letters F061..F07C).
+    elif d[at+3]==1 and kind==0 and size>=8 and 0xf000<=struct.unpack_from('>H',d,at+6)[0]<=0xf0ff:chars.append(chr(struct.unpack_from('>H',d,at+6)[0]))
+    at+=size;continue
+   chars.append(d[at:at+2].decode('utf-16be'));at+=2
+  result[struct.unpack_from('>I',d,blocks[b'MID1']+16+index*4)[0]]=''.join(chars)
+ return result
+
+def assign_text_styles(text_styles,panels):
+ # As main(): SetMessage selects BMG font 1, kart_kanji_font (index 0).
+ for panel in panels:
+  for pane in pane_records.get(panel,{}).values():
+   if pane.get('kind')!='txt1' or 'textStyle' in pane:continue
+   pane.setdefault('authoredFont',pane['font']);pane['font']=0;pane['messageFontIndex']=1
+   style={'colors':pane['textColors'],'vertices':pane['textVertexColors']}
+   if style not in text_styles:text_styles.append(style)
+   pane['textStyle']=text_styles.index(style)+1
+
+def bake_glyph_atlas():
+ """Every kart_kanji_font glyph of Latin text (ASCII, Latin-1 and the
+ punctuation Menu.bmg uses), white on alpha, in one atlas sprite."""
+ font=ROOT/'assets/race-ui/Font/kart_kanji_font.brfnt';source(font);data=font.read_bytes()
+ available=set()
+ for tag,_,at in sections(data):
+  if tag==b'CMAP':
+   lo,hi,kind=struct.unpack_from('>3H',data,at)
+   if kind==0:available.update(range(lo,hi+1))
+   elif kind==1:available.update(c for c in range(lo,hi+1) if struct.unpack_from('>H',data,at+12+2*(c-lo))[0]!=65535)
+   else:
+    count=struct.unpack_from('>H',data,at+12)[0];available.update(struct.unpack_from('>H',data,at+14+i*4)[0] for i in range(count))
+ codes=[c for c in [*range(0x20,0x7f),*range(0xa1,0x100),0x2018,0x2019,0x201c,0x201d,0x2026,0x2013,0x2014,0x2190] if c in available]
+ glyphs=font_strings(font,[chr(c) for c in codes])
+ extension=ROOT/'assets/race-ui/Font/tt_kart_extension_font.brfnt';source(extension)
+ ranks=[0xf061,0xf062,0xf063,0xf078,0xf079,0xf07a,0xf07b,0xf07c]
+ cell=max(g.height for g in glyphs.values())
+ for c,g in font_strings(extension,[chr(c) for c in ranks]).items():
+  glyphs[c]=g.resize((max(1,round(g.width*cell/g.height)),cell),Image.Resampling.LANCZOS)
+ codes+=ranks
+ width=1024;x=y=0;placed=[]
+ for c in codes:
+  g=glyphs[chr(c)]
+  if x+g.width>width:x=0;y+=cell+1
+  placed.append((c,x,y,g.width));x+=g.width+1
+ atlas=Image.new('RGBA',(width,y+cell))
+ for c,gx,gy,_ in placed:atlas.alpha_composite(glyphs[chr(c)],(gx,gy))
+ # Menu text is at most ~25 source pixels tall on the 400x240 screen: half the
+ # BRFNT resolution keeps every glyph sharp at a quarter of the LINEAR memory.
+ save('glyph_atlas',atlas.resize((atlas.width//2,atlas.height//2),Image.Resampling.LANCZOS),font)
+ return [dict(code=c,u0=gx/atlas.width,v0=gy/atlas.height,u1=(gx+w)/atlas.width,v1=(gy+cell)/atlas.height,w=w) for c,gx,gy,w in placed],cell
+
+def bake_save_pages(text_styles):
+ title='Title/message_window/blyt/'
+ bake_panel('message',title+'common_w017_message.brlyt',states=('',),exclude=('text',),window_frames=True)
+ # BusySymbol: the layout is only the eight parts_0N dots, which blink in turn
+ # (Loop group, RLVC 16): one sprite each; menu_ui.cpp animates their alpha.
+ busy=title+'common_w073_loading.brlyt'
+ _,_,pane_records['busy']=render_layout(ROOT/'assets/menu-ui'/busy,source,bounds=(-304,-228,304,228))
+ for i in range(8):
+  im,rect,_=render_layout(ROOT/'assets/menu-ui'/busy,source,include=(f'parts_{i:02d}',),pane_overrides={f'parts_{i:02d}':{'alpha':1,'visible':True}})
+  save(f'busy_parts_{i:02d}',im,ROOT/'assets/menu-ui'/busy);panel_records[f'busy_parts_{i:02d}']=rect
+ # Records pages 0xCE-0xD2: Record_N rows (record_parts) and NextRecordButton.
+ bake_panel('record','MenuOther/control/blyt/record_parts.brlyt',states=('',),exclude=('menu_text','score'))
+ bake_panel('next_record','MenuOther/button/blyt/common_w084_earth_delete.brlyt',exclude=('text',))
+ # MessageWindowLicenseDisplay (page 0x66: "Your new license is ready.").
+ bake_panel('message_quarter',title+'common_w079_message_quarter.brlyt',states=('',),exclude=('text',),window_frames=True)
+ # LicenseManagementButton variants Record / ChangeMii / Delete carry BMG
+ # 0x848 / 0x898 / 0x837 (the brctr's message table).
+ bake_panel('license_menu','MenuOther/button/blyt/common_w097_license_screen_menu.brlyt',exclude=('text',))
+ # Occupied cards: the authored card without the sample Mii face; trophies,
+ # cup icons and their "?" covers are separate sprites placed per licence
+ # (refreshLicenseControl, PAL 0x805EC4E8).
+ data_panes=('cc','hatena','bronze','silver','gold','n_','r_')
+ for position in ['top','bottom']:
+  bake_panel('license_'+position,'Title/button/blyt/common_w076_license_icon_tex_'+position+'.brlyt',exclude=data_panes,hidden=('mii',),window_frames=True)
+ card=ROOT/'assets/menu-ui/Title/button/blyt/common_w076_license_icon_tex_top.brlyt'
+ nodes={n['name']:n for n in pane_nodes(card)}
+ trophy=nodes['cc50_00']
+ for medal in ['gold','silver','bronze']:
+  c0,c1=nodes[medal+'_color']['materialColors']
+  im,rect,_=render_layout(card,source,include=('cc50_00',),material_overrides={trophy['material']:[c0,c1,[255,255,255,255]]})
+  save('license_trophy_'+medal,im,card);panel_records['license_trophy_'+medal]=rect
+ for cup in ['n_0_kinoko','n_1_flower','n_2_star','n_3_special','r_0_koura','r_1_banana','r_2_konoha','r_3_thunder','n_2_hatena','n_3_hatena','r_2_hatena','r_3_hatena']:
+  im,rect,_=render_layout(card,source,include=(cup,))
+  save('license_cup_'+cup,im,card);panel_records['license_cup_'+cup]=rect
+ assign_text_styles(text_styles,['record','next_record_free','next_record_select','next_record','message','message_quarter','license_menu_free','license_menu_select','license_menu','license_top_free','license_top_select','license_top','license_bottom_free','license_bottom_select','license_bottom'])
+ bmg=ROOT/'assets/menu-ui/MenuSingle_U/message/Menu.bmg';source(bmg)
+ messages_by_id=save_messages(bmg)
+ # The favourites' name messages (characters, vehicles, courses, stages) are in Common.bmg.
+ common=ROOT/'assets/menu-ui/MenuSingle_U/message/Common.bmg';source(common)
+ for key,text in save_messages(common).items():messages_by_id.setdefault(key,text)
+ # The staff roll (credits pages 0x3D) is MenuOther_U's StaffRoll.bmg; its ids do not
+ # occur in Menu.bmg or Common.bmg.
+ staff=ROOT/'assets/menu-ui/MenuOther_U/message/StaffRoll.bmg';source(staff)
+ for key,text in save_messages(staff).items():
+  if key in messages_by_id:raise ValueError(f'StaffRoll.bmg id {key:#x} also in Menu/Common.bmg')
+  messages_by_id[key]=text
+ glyphs,cell=bake_glyph_atlas()
+ return [messages_by_id[i] for i in SAVE_MESSAGE_IDS],glyphs,cell
+
+def bake_unlock_credits_pages(text_styles):
+ """Unlock pages (sections 0x90-0x93, Present.szs) and the credits pages (MenuOther ending).
+ Text is drawn at runtime (runText) from the cooked messages; these are the panels."""
+ present='Present/control/blyt/'
+ # Page 0x5B: MenuBG with the option_bg layout (same panes and loop as bg, other colours).
+ bake_panel('unlock_bg','Present/common/blyt/option_bg.brlyt',states=('',))
+ for kind in ['course','driver','mii','vehicle']:
+  # Page 0x5E (fn_1_33E5B8 PAL 0x8084E96C): <Type>_MenuObiTop / _MenuObiBottom, the title text.
+  bake_panel('unlock_obi_top_'+kind,present+f'present_obi_top_{kind}.brlyt',states=('',))
+  bake_panel('unlock_obi_bottom_'+kind,present+f'present_obi_bottom_{kind}.brlyt',states=('',))
+  title=present+('present_obi_top_text.brlyt' if kind=='vehicle' else f'present_obi_top_text_{kind}.brlyt')
+  # Text-only layout (title_null + text): pane rectangles for runText.
+  _,_,pane_records['unlock_title_'+kind]=render_layout(ROOT/'assets/menu-ui'/title,source,bounds=(-304,-228,304,228))
+  # Page 0xCD: <Type>_MessageWindowHalf (fn_1_343B0C PAL 0x80853EC0).
+  bake_panel('unlock_window_'+kind,present+f'present_message_window_{kind}.brlyt',states=('',),exclude=('text',),window_frames=True)
+ # CupIcon (cup_icon_set_p) for cup and Mirror rewards: only the pane rectangle.
+ _,_,pane_records['unlock_cup_icon']=render_layout(ROOT/'assets/menu-ui'/present/'cup_icon_set_position.brlyt',source,bounds=(-304,-228,304,228))
+ # Credits page 0x3D: the six StaffRoll text controls (text only).
+ for position in ['center','top','bottom']:
+  _,_,pane_records['staff_'+position]=render_layout(ROOT/'assets/menu-ui/MenuOther/ending/blyt'/f'ending_text_{position}_type.brlyt',source,bounds=(-304,-228,304,228))
+ # Page 0x3E: EndingMovie's movie_set pane; page 0x3F: EndingCloseBG (text 0x1E16).
+ _,_,pane_records['ending_movie']=render_layout(ROOT/'assets/menu-ui/MenuOther/ending/blyt/ending_movie_set_position.brlyt',source,bounds=(-304,-228,304,228))
+ bake_panel('ending_close','MenuOther/ending/blyt/ending_photo_snap_bg.brlyt',states=('',),exclude=('congratulations',))
+ assign_text_styles(text_styles,['unlock_title_course','unlock_title_driver','unlock_title_mii','unlock_title_vehicle',
+  'unlock_window_course','unlock_window_driver','unlock_window_mii','unlock_window_vehicle','staff_center','staff_top','staff_bottom','ending_close'])
+
 def bake_ok_glows(name,resource,drivers,cups,group_name='OK'):
  p=ROOT/'assets/menu-ui'/resource;binding=None
  for control in sorted((p.parent.parent/'ctrl').glob('*.brctr')):
@@ -408,7 +576,7 @@ def main():
  runtime_palette=[[list(struct.unpack_from('>4h',raw,0x8088fd18-BASE+slot*24+i*8)) for i in range(3)] for slot in range(6)]
  # Source audit retains every UI layout/controller/animation, including deferred pages.
  inventory={}
- for archive in ['MenuSingle','MenuSingle_U','MenuOther','MenuOther_U','Title','Title_U','Award','Award_U','Globe']:
+ for archive in ['MenuSingle','MenuSingle_U','MenuOther','MenuOther_U','Title','Title_U','Award','Award_U','Globe','Present','Present_U']:
   p=ROOT/'data/extracted/Scene/UI'/f'{archive}.szs';source(p)
   base=ROOT/'assets/menu-ui'/archive
   inventory[archive]={ext:len(list(base.rglob('*.'+ext))) for ext in ['brlyt','brctr','brlan','tpl','bmg']}
@@ -505,6 +673,10 @@ def main():
  for i,n in enumerate(drivers):tpl('driver_'+str(i),UI/'button/timg'/f'tt_{n}_64x64.tpl')
  cups=['kinoko','flower','star','oukan','koura','banana','konoha','thunder']
  for i,n in enumerate(cups):tpl('cup_'+str(i),UI/'button/timg'/f'tt_cup_icon_{n}_00.tpl')
+ # Locked buttons: the cha_26_hatena / icon_08_hatena materials (character, machine and
+ # cup icon layouts) use tt_hatena_64x64; the unlock page's Mirror icon (icon_12_mirror).
+ tpl('icon_hatena',UI/'button/timg/tt_hatena_64x64.tpl')
+ tpl('cup_mirror',UI/'button/timg/tt_cup_icon_mirror_00.tpl')
  for i,n in enumerate(['tt_wii_icon_128.tpl','tt_classic_icon_sphere_128.tpl']):
   tpl('battle_cup_'+str(i),UI/'button/timg'/n)
  for i,n in enumerate(['1','2','3','m']):tpl('class_'+str(i),UI/'button/timg'/f'tt_class_kinoko_{n}.tpl')
@@ -672,6 +844,8 @@ def main():
      color=tuple(round(sum(v[10+c] for v in tri)/3) for c in range(4));draw.polygon(pts,fill=color)
   r=save('map_'+str(i),img,path);maps.append({'bounds':[xmin,zmin,xmax,zmax],'sourceNodes':nodes,'sprite':'map_'+str(i),'course':course_names[i]})
  bake_late(menu_messages,labels,text_styles,text_unique,late_race_roles)
+ save_texts,save_glyphs,glyph_cell=bake_save_pages(text_styles)
+ bake_unlock_credits_pages(text_styles)
  # Recover selection magnification and entry duration from retail BRLAN.
  anim=UI/'button/anim/common_w004_menu_free_to_select.brlan';source(anim);dur,tracks=animation(anim)
  scales=[sample(tracks[('pause_w_fade_n','RLPA',6)],i) for i in range(dur)]
@@ -679,6 +853,11 @@ def main():
  controller_paths=[p for archive in ['Title','MenuSingle'] for p in sorted((ROOT/'assets/menu-ui'/archive).rglob('*.brctr'))]
  controller_paths += [ROOT/'assets/race-ui/Race/button/ctrl'/(name+'.brctr') for name in ['PauseMenuVS','PauseMenuGrandPrix','PauseMenuTimeAttack','PauseMenuBT']]
  controller_paths += [ROOT/'assets/race-ui/Race/game_image/ctrl'/(name+'.brctr') for name in ['PadInfoClassic','RaceMessageWindow']]
+ # Licence settings and display (pages 0x66-0x68): MenuOther controls, appended.
+ controller_paths += [ROOT/'assets/menu-ui/MenuOther'/folder/'ctrl'/(name+'.brctr') for folder,name in [('button','LicenseManagementButton'),('control','LicenseManagement'),('control','LicenseDisplay'),('message_window','MessageWindowLicenseDisplay'),('control','Record'),('button','NextRecordButton')]]
+ # Unlock pages: Present control/ (the <Type>_ names retail loads) and NextButton; credits: MenuOther ending.
+ controller_paths += sorted((ROOT/'assets/menu-ui/Present/control/ctrl').glob('*.brctr'))+[ROOT/'assets/menu-ui/Present/common/ctrl/NextButton.brctr']
+ controller_paths += sorted((ROOT/'assets/menu-ui/MenuOther/ending/ctrl').glob('*.brctr'))
  for p in controller_paths:
   if p.name.startswith('._'):continue
   source(p);data=controllers(p);ctr.setdefault(p.stem,{}).update(data);alphas.setdefault(p.stem,{}).update(controller_alphas(p));qualified_controllers[p.relative_to(ROOT).as_posix()]=data
@@ -728,7 +907,16 @@ def main():
  lines += ['{'+','.join(f'{x:.8f}f' for x in m['bounds'])+'},' for m in maps]
  light_blend=pane_records['press_start']['text_light']['blend']
  if light_blend not in ([1,4,5,3],[1,4,1,3]):raise ValueError('Unsupported PressStart light blend: '+str(light_blend))
- lines+=['};','inline constexpr bool UiPressStartLightAdditive='+str(light_blend[2]==1).lower()+';','}'];(ROOT/'include/mkw/menu_assets.hpp').write_text('\n'.join(lines)+'\n')
+ lines+=['};','inline constexpr bool UiPressStartLightAdditive='+str(light_blend[2]==1).lower()+';']
+ # Save and licence pages: Menu.bmg texts (U+0001 = the Mii/player name), the
+ # runtime glyph atlas and every text style's TEV colours (lo, hi, top, bottom).
+ lines+=['inline constexpr unsigned UiSaveMessageIds[]={'+','.join(hex(i) for i in SAVE_MESSAGE_IDS)+'};',
+         'inline constexpr const char* UiSaveMessages[]={'+','.join(json.dumps(t,ensure_ascii=False).replace('\\u0001','\\x01""') for t in save_texts)+'};',
+         'struct UiGlyph {unsigned code;float u0,v0,u1,v1,w;};','inline constexpr UiGlyph UiGlyphs[]={']
+ lines+=['{'+','.join([str(g['code'])]+[f"{g[k]:.8f}f" for k in ('u0','v0','u1','v1')]+[f"{float(g['w']):.1f}f"])+'},' for g in save_glyphs]
+ pack=lambda c:'0x'+''.join(f'{max(0,min(255,int(v))):02x}' for v in c)+'u'
+ lines+=['};',f'inline constexpr float UiGlyphCell={float(glyph_cell):.1f}f;','inline constexpr unsigned UiTextStyleColors[][4]={'+','.join('{'+','.join([pack(s['colors'][0]),pack(s['colors'][1]),pack(s['vertices'][0]),pack(s['vertices'][1])])+'}' for s in text_styles)+'};','}']
+ (ROOT/'include/mkw/menu_assets.hpp').write_text('\n'.join(lines)+'\n')
  print(f'Cooked {len(records)} source UI sprites, {len(panel_records)} layout panels, {len(movie_records)} retail movies, 32 source minimaps; {len(evidence)} hashed sources')
  # The runtime textures are fitted to the 3DS screen and LZ11-compressed from
  # these full-resolution PNGs; that pass also rewrites the header's UVs.

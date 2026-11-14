@@ -30,6 +30,9 @@ public:
     // The saved personal best for a course in milliseconds (0: none).
     static uint32_t savedTime(unsigned course);
     static bool save(const GhostRecorder& run,const GhostInfo& info);
+    // The active licence (0-3): licence 1 keeps ghosts/pb-XX.rkg, licences 2-4
+    // ghosts/license-N/pb-XX.rkg (the licence's own personal-best ghosts).
+    static void setLicense(unsigned slot);
 private:
     std::vector<uint8_t> file_;
     std::vector<GhostFrame> frames_;

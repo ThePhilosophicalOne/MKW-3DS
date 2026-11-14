@@ -16,6 +16,11 @@ public:
  void close();
  bool ready()const;
  bool finished()const;
+ // The stream cannot play (no DSP, missing or malformed file, read error).
+ bool failed()const;
+ // Seconds of the stream the DSP has played (completed buffers plus the playing one's
+ // position; never decreasing). 0 until it plays. The credits movie's picture follows it.
+ double playedSeconds()const;
  // Loads the DSP component once (call at boot); open() also ensures it.
  static void initialize();
  static bool dspReady();

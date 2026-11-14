@@ -60,6 +60,10 @@ struct MenuMovieAudio::Impl {
  std::array<ndspWaveBuf,3> waves{};
  std::array<std::shared_ptr<FillJob>,3> fills;
  float volume=1;bool dsp=false,failed=false,ended=false;
+ // Samples of the buffers already counted as played, per buffer whether it is, and the
+ // last reported position (a buffer change between reading the status and the position
+ // can only read low: the position never goes back).
+ std::uint64_t played=0;std::array<bool,3> counted{};mutable std::uint64_t lastPlayed=0;
  // NDSP channel: 0 when the sound system is not running, otherwise one it
  // lends us while this stream plays (sound_system.hpp reserveChannel).
  int channel=-1;bool borrowed=false;
@@ -93,6 +97,7 @@ void MenuMovieAudio::close(){
  // later call, never in the same instant the channel is cleared.
  if(s.stream)s.retired=std::move(s.stream);
  s.waves={};s.failed=false;s.ended=false;
+ s.played=0;s.counted={};s.lastPlayed=0;
 }
 bool MenuMovieAudio::open(const char* path,bool loop,unsigned loopStartSample){
  close();auto& s=*impl_;
@@ -121,7 +126,7 @@ void MenuMovieAudio::update(){
   s.dsp=true;
   for(unsigned i=0;i<s.waves.size();++i){
    auto& wave=s.waves[i];wave={};wave.data_vaddr=stream.buffers[i];wave.status=NDSP_WBUF_FREE;
-   if(job->filled[i]){wave.nsamples=job->filled[i]/(stream.channels*2);ndspChnWaveBufAdd(c,&wave);}
+   if(job->filled[i]){wave.nsamples=job->filled[i]/(stream.channels*2);s.counted[i]=false;ndspChnWaveBufAdd(c,&wave);}
    else s.ended=true;
   }
   return;
@@ -134,9 +139,10 @@ void MenuMovieAudio::update(){
    auto job=std::move(fill);
    if(!job->ok){s.failed=true;return;}
    if(!job->bytes){s.ended=true;continue;}
-   wave.nsamples=job->bytes/(s.stream->channels*2);wave.looping=false;ndspChnWaveBufAdd(s.channel,&wave);
+   wave.nsamples=job->bytes/(s.stream->channels*2);wave.looping=false;s.counted[i]=false;ndspChnWaveBufAdd(s.channel,&wave);
    continue;
   }
+  if(wave.status==NDSP_WBUF_DONE&&!s.counted[i]){s.played+=wave.nsamples;s.counted[i]=true;}
   if(s.ended)continue;
   if(wave.status!=NDSP_WBUF_DONE&&wave.status!=NDSP_WBUF_FREE)continue;
   fill=std::make_shared<FillJob>();fill->stream=s.stream;fill->index=i;
@@ -148,6 +154,19 @@ void MenuMovieAudio::setVolume(float gain){
  float mix[12]={};mix[0]=mix[1]=std::clamp(gain,0.f,1.f);ndspChnSetMix(impl_->channel,mix);
 }
 bool MenuMovieAudio::ready()const{return impl_->dsp&&!impl_->failed;}
+bool MenuMovieAudio::failed()const{return impl_->failed||dspState<0;}
+double MenuMovieAudio::playedSeconds()const{
+ const auto& s=*impl_;if(!s.dsp||!s.stream||!s.stream->rate)return 0;
+ std::uint64_t samples=s.played;bool playing=false;
+ for(unsigned i=0;i<s.waves.size();++i){
+  const auto status=s.waves[i].status;
+  if(status==NDSP_WBUF_DONE&&!s.counted[i])samples+=s.waves[i].nsamples;
+  playing|=status==NDSP_WBUF_PLAYING;
+ }
+ if(playing)samples+=ndspChnGetSamplePos(s.channel);
+ s.lastPlayed=std::max(s.lastPlayed,samples);
+ return double(s.lastPlayed)/s.stream->rate;
+}
 bool MenuMovieAudio::finished()const{
  const auto& s=*impl_;if(!s.dsp||!s.ended||(s.stream&&s.stream->looping))return false;
  for(const auto& fill:s.fills)if(fill)return false;

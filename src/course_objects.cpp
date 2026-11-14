@@ -188,6 +188,32 @@ struct CourseObjects::Impl {
 CourseObjects::CourseObjects():impl_(std::make_unique<Impl>()){}
 CourseObjects::~CourseObjects()=default;
 unsigned CourseObjects::palmCount() const {return impl_->palms.size();}
+void CourseObjects::startDemoLakitu(unsigned tick){
+    for(auto& v:impl_->visuals)if(v.geo&&v.geo->id()==0x2DB){v.lastState=1;v.stateTick=tick;}
+}
+bool CourseObjects::demoLakituRoot(unsigned tick,Vec3& out) const {
+    for(const auto& v:impl_->visuals){
+        if(!v.geo||v.geo->id()!=0x2DB||!v.main.model||!v.main.model->bank)continue;
+        const auto& bank=*v.main.model->bank;
+        const int node=bank.node("root");
+        if(node<0)return false;
+        const auto& n=bank.nodes()[size_t(node)];
+        // The joint's model-space matrix: the posed palette slot, else its bind world.
+        float local[3]={n.world[3],n.world[7],n.world[11]};
+        if(v.lastState==1&&tick>=v.stateTick&&v.clips[0]>=0&&n.slot>=0){
+            std::vector<float> palette(size_t(bank.matrixCount())*12);
+            bank.pose(v.clips[0],float(tick-v.stateTick),palette.data());
+            const float* m=palette.data()+size_t(n.slot)*12;
+            local[0]=m[3];local[1]=m[7];local[2]=m[11];
+        }
+        const C3D_Mtx p=v.kinetic&&v.object?objectMatrix(v.object->transform(),v.object->scale()):v.placement;
+        out={p.r[0].x*local[0]+p.r[0].y*local[1]+p.r[0].z*local[2]+p.r[0].w,
+             p.r[1].x*local[0]+p.r[1].y*local[1]+p.r[1].z*local[2]+p.r[1].w,
+             p.r[2].x*local[0]+p.r[2].y*local[1]+p.r[2].z*local[2]+p.r[2].w};
+        return true;
+    }
+    return false;
+}
 unsigned CourseObjects::moveTexturesToVram(Renderer& renderer,std::size_t reserve){
     unsigned moved=0;
     auto move=[&](const Model* model){if(model)for(const auto& t:model->textures)if(t)moved+=renderer.moveToVram(*t,reserve);};

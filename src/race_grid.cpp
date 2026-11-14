@@ -1,6 +1,7 @@
 #include <mkw/race_grid.hpp>
 #include <mkw/bullet_bill.hpp>
 #include <mkw/garage.hpp>
+#include <mkw/unlocks.hpp>
 #include <game/system/RaceConfig.hh>
 #include <game/system/RaceManager.hh>
 #include <game/system/KPadDirector.hh>
@@ -158,8 +159,8 @@ Vec3 EnemyRoute::target(unsigned segment,unsigned racer,Vec3 pos,float lookahead
 
 void RaceGrid::drawLineup(unsigned localDriver){
     // The menus choose the CPU racers once per Grand Prix / VS set (RaceConfig menu
-    // scenario), with a time-seeded Util::Random. Every character and vehicle is
-    // unlocked in this port (characterIsUnlocked, fn_1_3FD18 always pass).
+    // scenario), with a time-seeded Util::Random. Locked characters and vehicles of the
+    // active licence are drawn again (characterIsUnlocked, fn_1_3FD18; Session::unlocks).
     constexpr unsigned driverCount=GarageChoices.size()/VehiclesPerDriver;
     std::array<unsigned,driverCount> driverOf{}; // retail character id -> garage driver
     for(unsigned d=0;d<driverCount;++d)driverOf[GarageChoices[d*VehiclesPerDriver].character%driverCount]=d;
@@ -174,7 +175,7 @@ void RaceGrid::drawLineup(unsigned localDriver){
     characters[0]=GarageChoices[localDriver*VehiclesPerDriver].character%driverCount;++classes[weight(characters[0])];
     for(unsigned i=1;i<n;++i){
         unsigned id=next(driverCount);
-        while(classes[weight(id)]>=limit||std::find(characters.begin(),characters.begin()+i,id)!=characters.begin()+i)id=next(driverCount);
+        while(classes[weight(id)]>=limit||std::find(characters.begin(),characters.begin()+i,id)!=characters.begin()+i||!unlock::characterUnlocked(session_.unlocks,id))id=next(driverCount);
         characters[i]=id;++classes[weight(id)];
     }
     // Vehicles. Battle (fn_1_32A9A0, 0x8083AD54): the class's standard kart (0/1/2) or bike
@@ -188,7 +189,7 @@ void RaceGrid::drawLineup(unsigned localDriver){
         if(session_.mode==Session::Mode::Battle){
             const unsigned coin=next(2);
             vehicle=rule==0?w:rule==1?18+w:coin==0?w:18+w;
-        }else do vehicle=w+3*next(12);while((rule==0&&vehicle>=18)||(rule==1&&vehicle<18));
+        }else do vehicle=w+3*next(12);while((rule==0&&vehicle>=18)||(rule==1&&vehicle<18)||!unlock::vehicleUnlocked(session_.unlocks,vehicle));
         unsigned slot=0;
         for(unsigned s=0;s<VehiclesPerDriver;++s)if(GarageChoices[d*VehiclesPerDriver+s].vehicle==vehicle){slot=s;break;}
         lineup_[i]=d*VehiclesPerDriver+slot;
@@ -199,6 +200,8 @@ void RaceGrid::configure(Kinoko::System::RaceConfig& config,unsigned localChoice
     static_assert(GarageChoices.size()%VehiclesPerDriver==0&&driverCount>=Capacity);
     count_=std::clamp(count,1u,Capacity);localChoice%=GarageChoices.size();
     auto& scenario=config.raceScenario();scenario.playerCount=count_;
+    // Retail grid order: slot = prevFinishPos (findKartStartPoint, 0x805362DC).
+    Kinoko::System::RaceManager::SetStartPositions(session_.startPositions.data(),count_);
     const unsigned course=unsigned(scenario.course);
     battleArena_=course>=32&&course<42;
     const unsigned localDriver=localChoice/VehiclesPerDriver;
@@ -231,7 +234,8 @@ bool RaceGrid::reset(){
     auto* kartObjects=Kart::KartObjectManager::Instance();
     for(unsigned i=0;i<count_;++i){
         auto* kart=kartObjects->object(i);
-        ranks_[i]=i+1;
+        // The live position starts at the grid slot (RaceManagerPlayer +0x20, Raceinfo_construct).
+        ranks_[i]=session_.startPositions[i]?session_.startPositions[i]:i+1;
         // Stat speed times the engine-class rate (retail KartMove +0x14).
         drivers_[i].nativeSpeed=kart->move()->statBaseSpeed();
         drivers_[i].last=native(kart->pos());

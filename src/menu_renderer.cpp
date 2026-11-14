@@ -67,6 +67,7 @@ struct MenuRenderer::Impl {
  struct Slot {std::unique_ptr<Texture> texture;std::shared_ptr<TextureJob> job;std::uint32_t used=0;unsigned failures=0;bool deferred=false;};
  std::array<Slot,std::size(UiSprites)> slots;
  std::array<std::unique_ptr<MenuMovie>,std::size(UiMovieStreams)> movies;
+ std::unique_ptr<MenuMovie> credits;   // the ending movie of credits part 2
  Residency pinned{},pinning{};Streams streamsPinned{},streamsPinning{};
  std::uint32_t frame=1,bytes=0;
  // Synchronous (prepare) bookkeeping.
@@ -152,7 +153,16 @@ void MenuRenderer::streamMovies(const std::vector<UiQuad>& quads,std::uint64_t t
   s.movies[i]->request(ticks);
  }
 }
-void MenuRenderer::uploadMovies(){for(auto& m:impl_->movies)if(m)m->upload();}
+void MenuRenderer::uploadMovies(){for(auto& m:impl_->movies)if(m)m->upload();if(impl_->credits)impl_->credits->upload();}
+bool MenuRenderer::openCreditsMovie(const char* path){impl_->credits=std::make_unique<MenuMovie>();return impl_->credits->open(path,false);}
+void MenuRenderer::streamCreditsMovie(std::uint64_t ticks){
+ if(!impl_->credits)return;
+ // Only the 192 source rows of the 256-row ETC1 frame are visible.
+ impl_->credits->setRows(0,192);impl_->credits->request(ticks);
+}
+bool MenuRenderer::creditsMovieStarted()const{return impl_->credits&&impl_->credits->ready()&&impl_->credits->texture();}
+bool MenuRenderer::creditsMovieFinished()const{return impl_->credits&&(impl_->credits->finished()||impl_->credits->failed());}
+void MenuRenderer::closeCreditsMovie(Renderer& renderer){if(impl_->credits)renderer.retire(std::move(impl_->credits));}
 bool MenuRenderer::hasMovies()const{for(const auto& m:impl_->movies)if(m)return true;return false;}
 bool MenuRenderer::moviesFinished()const{bool any=false;for(const auto& m:impl_->movies)if(m){any=true;if(!m->finished())return false;}return any;}
 bool MenuRenderer::needsPrepare(const std::vector<UiQuad>& quads,bool)const{
@@ -181,7 +191,9 @@ void MenuRenderer::draw(Renderer& renderer,const std::vector<UiQuad>& quads,bool
  for(unsigned i=first;i<std::min(end,unsigned(quads.size()));++i){const auto& q=quads[i];
   if(q.bottom!=bottom)continue;
   if(q.vehicleIcon<12){if(icons)icons->draw(renderer,q);}
-  else if(q.movie<std::size(UiMovieRegions)){
+  else if(q.movie==UiCreditsMovie){
+   if(impl_->credits&&impl_->credits->texture())renderer.drawScreenSpriteRegion(*impl_->credits->texture(),q.x,q.y,q.w,q.h,q.u0,q.v0,q.u1,q.v1,q.alpha,q.tint,q.corners.data(),q.additive);
+  }else if(q.movie<std::size(UiMovieRegions)){
    const auto& r=UiMovieRegions[q.movie];const auto& movie=impl_->movies[r.stream];
    if(movie&&movie->texture())renderer.drawScreenSpriteRegion(*movie->texture(),q.x,q.y,q.w,q.h,r.u0+(r.u1-r.u0)*q.u0,r.v0+(r.v1-r.v0)*q.v0,r.u0+(r.u1-r.u0)*q.u1,r.v0+(r.v1-r.v0)*q.v1,q.alpha,q.tint,q.corners.data(),q.additive);
   }else if(q.sprite<impl_->slots.size()&&impl_->slots[q.sprite].texture){const auto& info=UiSprites[q.sprite];
@@ -199,12 +211,14 @@ void MenuRenderer::release(Renderer& renderer){
  auto& s=*impl_;
  for(unsigned i=0;i<s.slots.size();++i){auto& slot=s.slots[i];if(slot.job){slot.job->cancel();slot.job.reset();}slot.failures=0;slot.deferred=false;renderer.retire(s.remove(i));}
  for(auto& m:s.movies)renderer.retire(std::move(m));
+ if(s.credits)renderer.retire(std::move(s.credits));
  s.pinned.reset();s.pinning.reset();s.streamsPinned.fill(false);s.streamsPinning.fill(false);
 }
 void MenuRenderer::release(){
  auto& s=*impl_;
  for(unsigned i=0;i<s.slots.size();++i){auto& slot=s.slots[i];if(slot.job){slot.job->cancel();slot.job.reset();}slot.failures=0;slot.deferred=false;s.remove(i);}
  for(auto& m:s.movies)m.reset();
+ s.credits.reset();
  s.pinned.reset();s.pinning.reset();s.streamsPinned.fill(false);s.streamsPinning.fill(false);
 }
 std::uint32_t MenuRenderer::residentBytes()const{return impl_->bytes;}

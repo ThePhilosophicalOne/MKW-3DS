@@ -44,6 +44,13 @@ public:
     // Renderer::moveToVram for every object model's textures; returns the
     // number moved. GPU idle (Renderer::waitForGpu).
     unsigned moveTexturesToVram(Renderer& renderer,std::size_t reserve);
+    // The award scene's Lakitu (DemoJugemu 0x2DB, calc fn_1_24E5D8 0x8075E98C): its CHR0
+    // "o_jg-demowin" plays from frame 0 at the draw tick `tick` (the camera cut). Simulation
+    // thread, with no recording job running.
+    void startDemoLakitu(unsigned tick);
+    // Its "root" joint in the world as the model update of draw tick `tick` left it (the bind
+    // pose before the clip starts): where rk_JugemTail goes. False without a Lakitu.
+    bool demoLakituRoot(unsigned tick,Vec3& out) const;
     unsigned palmCount() const;
     unsigned modelCount() const;
     // QA review: one placement per object type, with its live world bounds.

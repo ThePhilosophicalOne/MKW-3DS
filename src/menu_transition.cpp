@@ -36,7 +36,7 @@ const char* uiSelectedMenuControl(const MenuState& state,bool back){
  switch(state.page){
  case UiPage::Title:return "PressStart";
  case UiPage::License:return state.cursor<2?"LicenseSelectT":"LicenseSelectB";
- case UiPage::MainMenu:return state.cursor==0?"TopMenuSingle":state.cursor<4?"TopMenuMulti":state.cursor<6?"TopMenuWifi":"TopMenuChannel";
+ case UiPage::MainMenu:return state.cursor==0?"TopMenuSingle":state.cursor<4?"TopMenuMulti":state.cursor<6?"TopMenuWifi":state.cursor==7?"FileAdmin":"TopMenuChannel";
  case UiPage::Mode:return "SingleTop";
  case UiPage::EngineClass:return "ClassSelect2";
  case UiPage::VSMode:return "VSSelect";
@@ -56,6 +56,11 @@ const char* uiSelectedMenuControl(const MenuState& state,bool back){
  case UiPage::Pause:return uiPauseMenuControl(state);
  case UiPage::QuitConfirm:return uiPauseMenuControl(state); // AfterMenuEndConfirm's animations (menu_ui.cpp)
  case UiPage::Error:case UiPage::NoGhosts:return "ConfirmOK";
+ // Save and licence pages (Release 1).
+ case UiPage::LicenseCreateConfirm:case UiPage::LicenseMiiMissing:case UiPage::LicenseErased:return "ConfirmOK";
+ case UiPage::SaveError:case UiPage::LicenseMiiConfirm:case UiPage::LicenseErase:return "YesNoButton";
+ case UiPage::LicenseSettings:return "LicenseManagementButton";
+ case UiPage::Records:return "NextRecordButton";
  default:return "";
  }
 }
@@ -98,6 +103,9 @@ float uiMenuExitHold(const MenuState& state,bool back){
  // Physical B invokes the original page BackPress path with delay zero.
  // A pointer-clicked Back button would instead play its own OK animation.
  if(back)return 0.f;
+ // fn_1_3440C8 (PAL 0x8085447C): Next changes section after 90 frames when the page shows a
+ // model, else after the button's own delay (unlock::nextDelayFrames).
+ if(state.page==UiPage::Unlock)if(const unsigned model=unlock::nextDelayFrames(state.unlockPage.notice(),0))return float(model);
  if(state.page==UiPage::Title){
   const auto* clip=uiFindAnimationClip("PressStart","eAFPressStart","PressStart");
   return clip&&clip->rate>0?clip->duration/clip->rate:0.f;
@@ -111,7 +119,29 @@ float uiMenuExitHold(const MenuState& state,bool back){
 }
 
 bool uiMenuChangesSection(UiPage from,UiPage to,UiAction action){
+ // Licence actions: the Mii choice is section 0x45/0x46 (from the licence-select
+ // ConfirmPage; No on the Mii confirmation returns to it within the section);
+ // writing or erasing a licence changes page only; the save pages leave for
+ // the title section or the game.
+ if(action==UiAction::PickMii)return from!=UiPage::LicenseMiiConfirm;
+ if(action==UiAction::CreateLicense||action==UiAction::ChangeMii||action==UiAction::EraseLicense)return false;
  if(action!=UiAction::None)return action!=UiAction::ResumeRace;
+ // Section groups of the save and licence pages: 0x10-0x13 (save), the title
+ // sections (with licence select's ConfirmPages), 0x45/0x46 (Mii), 0x47 (settings).
+ auto group=[](UiPage p){
+  switch(p){
+  case UiPage::SaveCreating:case UiPage::SaveError:return 1;
+  case UiPage::LicenseMiiConfirm:case UiPage::LicenseReady:return 2;
+  case UiPage::LicenseSettings:case UiPage::LicenseErase:case UiPage::LicenseErased:case UiPage::Records:return 3;
+  // Unlock sections 0x90-0x93; credits 0x39/0x3A (demo), 0x3B/0x3C (movie), 0x3D/0x3E.
+  case UiPage::Unlock:return 4;
+  case UiPage::CreditsDemo:return 5;case UiPage::CreditsMovie:return 6;case UiPage::Congratulations:return 7;
+  default:return 0;
+  }
+ };
+ if(group(from)!=group(to))return true;
+ // One unlock page to the next is a new section (fn_1_3440C8 changes section).
+ if(from==UiPage::Unlock&&to==UiPage::Unlock)return true;
  // The pause pages' Quit, Change Course and Change Character change section
  // (RaceMenuPage_onButtonFront, PAL 0x8085A0F4, cases 1/5/6/0x18); only the
  // GP Quit pushes page 0x2C (QuitConfirm) in the race section.
@@ -128,7 +158,12 @@ void MenuTransition::reset(){
 }
 
 bool MenuTransition::begin(const MenuState& before,const MenuState& after,bool back,UiAction action){
- if(active()||(before.page==after.page&&action==UiAction::None))return false;
+ // The records pages are one UiPage with a tab; retail's are pages 0xCE-0xD2
+ // (fn_1_32736C replaces one with the next), so a tab change animates too.
+ const bool recordsTab=before.page==UiPage::Records&&after.page==UiPage::Records&&before.recordsTab!=after.recordsTab;
+ // An unlock page replaced by the next reward's (a new section with the same UiPage).
+ const bool nextUnlock=before.page==UiPage::Unlock&&after.page==UiPage::Unlock&&before.unlockPage.notice().bit!=after.unlockPage.notice().bit;
+ if(active()||(before.page==after.page&&action==UiAction::None&&!recordsTab&&!nextUnlock))return false;
  openingModal_=after.page==UiPage::Confirm&&before.page!=UiPage::Confirm;
  closingModal_=hasUnderlay_&&before.page==UiPage::Confirm&&after.page==underlay_.page&&action==UiAction::None;
  if(openingModal_){underlay_=before;hasUnderlay_=true;}

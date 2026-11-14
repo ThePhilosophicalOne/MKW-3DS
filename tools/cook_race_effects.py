@@ -73,7 +73,7 @@ NO_INDEX = 0xffffffff
 # Per cooked table (tools/cook_effect_archives.py splits archives by them); the merged table at
 # run time may grow to RaceEffects::MaxEmitters / MaxTextures (include/mkw/race_effects.hpp).
 MAX_EMITTERS, MAX_TEXTURES = 255, 96
-FORMS = {0: 'disc', 1: 'line', 7: 'cylinder', 8: 'sphere', 9: 'point'}
+FORMS = {0: 'disc', 1: 'line', 5: 'cube', 7: 'cylinder', 8: 'sphere', 9: 'point'}
 PTCL_TYPES = {3: 'billboard', 4: 'directional', 5: 'stripe', 6: 'smooth stripe'}
 FIELDS = {0: 'gravity', 1: 'speed', 6: 'spin', 7: 'random'}
 TEX_FORMATS = {0: ('la4', 'I4'), 1: ('la8', 'I8'), 3: ('la8', 'IA8'), 4: ('rgb565', 'RGB565'),
@@ -224,6 +224,9 @@ def check(e, notes):
     form = emit & 0xff
     if form not in FORMS:
         raise ValueError(f'{name}: emitter form {form} is not ported')
+    # The cube's uniform layout (fn_8003A660's flag 0x20000 path) is not ported; no MKWii emitter uses it.
+    if form == 5 and emit & 0x20000:
+        raise ValueError(f'{name}: uniform cube emission is not ported')
     if d[0x84] or d[0x85] or d[0x86]:
         raise ValueError(f'{name}: LOD emission is not ported')
     ds = d[0x94:]

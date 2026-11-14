@@ -176,7 +176,18 @@ def header(rows):
 RETAIL_TEXTURE_LIGHTS = 4
 
 
+RETAIL_LIGHTING_HEADER = ROOT / 'include/mkw/course_lighting.hpp'
+# The scene stages (award, losing scene, credits run) load as courses through the same
+# posteffect path (StaticR 0x8055D608); tools/cook_ceremony.py extracts and imports them.
+DEMO_STAGES = ('winningrun_demo.szs', 'loser_demo.szs', 'ending_demo.szs')
+
+
 def main():
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument('--header', default=str(RETAIL_LIGHTING_HEADER))
+    p.add_argument('--json', default=str(ROOT / 'build/course-lighting.json'))
+    a = p.parse_args()
     common = archive(ROOT / 'data/extracted/Race/Common.szs')
     default_light = common.get('lightset/default.blight') or common['./lightset/default.blight']
     default_map = common.get('lightset/default.blmap') or common['./lightset/default.blmap']
@@ -185,8 +196,9 @@ def main():
         if src.name.startswith('._') or src.stem.endswith(('_d', '_Dif')):
             continue
         rows.append((f'Race/Course/{src.name}', course_lighting(src, default_light, default_map)))
-    if len(rows) != 42:
-        raise ValueError(f'expected 42 course archives, found {len(rows)}')
+    stages = [n for n, _ in rows if n.rsplit('/', 1)[1] in DEMO_STAGES]
+    if len(rows) - len(stages) != 42 or len(stages) != len(DEMO_STAGES):
+        raise ValueError(f'expected 42 course archives and the {len(DEMO_STAGES)} scene stages, found {len(rows)}')
     for name, r in rows:
         if len(r['lights']) < LIGHTS or len(r['ambients']) < LIGHTS:
             raise ValueError('retail courses carry 16 lights and 16 ambients: ' + name)
@@ -196,10 +208,10 @@ def main():
             raise ValueError('expected lm_0 and lm_1: ' + name)
         if any(t['type'] != 0 or len(t['entries']) > RETAIL_TEXTURE_LIGHTS for t in r['textures']):
             raise ValueError('unsupported light texture: ' + name)
-    (ROOT / 'include/mkw/course_lighting.hpp').write_text(header(rows))
-    (ROOT / 'build').mkdir(exist_ok=True)
-    (ROOT / 'build/course-lighting.json').write_text(json.dumps({name: r for name, r in rows}, indent=1) + '\n')
-    print(len(rows), 'courses')
+    Path(a.header).write_text(header(rows))
+    Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+    Path(a.json).write_text(json.dumps({name: r for name, r in rows}, indent=1) + '\n')
+    print(len(rows), 'courses and stages')
 
 
 if __name__ == '__main__':

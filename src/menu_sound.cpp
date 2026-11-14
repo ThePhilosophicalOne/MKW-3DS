@@ -61,9 +61,15 @@ std::uint32_t groupOf(MenuSound::Section s) {
 
 MenuSound::Section MenuSound::sectionOf(UiPage page) {
  switch (page) {
- case UiPage::Strap: case UiPage::Intro: return Section::None;
+ case UiPage::Strap: case UiPage::Intro: case UiPage::SaveCreating: case UiPage::SaveError: return Section::None;  // boot, sections 0x10-0x13
+ // Licence select's ConfirmPages, and the Mii / licence-settings sections 0x45-0x47
+ // entered from the title sections (their sound group was not traced: kept on the title's).
+ case UiPage::LicenseCreateConfirm: case UiPage::LicenseMiiMissing: case UiPage::LicenseMiiConfirm: case UiPage::LicenseReady:
+ case UiPage::LicenseSettings: case UiPage::LicenseErase: case UiPage::LicenseErased: case UiPage::Records: return Section::Title;
  case UiPage::Title: case UiPage::License: case UiPage::MainMenu: return Section::Title;  // sections 0x3f-0x44
  case UiPage::Race: case UiPage::Pause: case UiPage::QuitConfirm: case UiPage::Results: return Section::Race;
+ case UiPage::Unlock: return Section::Unlock;                                                 // sections 0x90-0x93
+ case UiPage::CreditsDemo: case UiPage::CreditsMovie: case UiPage::Congratulations: return Section::Credits;
  default: return Section::Single;                                                            // section 0x48
  }
 }
@@ -81,6 +87,13 @@ int MenuSound::layerOf(UiPage page) {
 
 void MenuSound::input(const MenuState& before, const MenuState& after, const UiInput& key, UiAction action) {
  if (!SoundSystem::instance().available()) return;
+ // The unlock page's Next (fn_1_3440C8 -> fn_1_3589A0 PAL 0x80868D54): a character
+ // reward's voice from table 0x808B1EA0, on the menu voice player.
+ if (before.page == UiPage::Unlock && after.page == UiPage::Unlock && !before.unlockPage.leaving() && after.unlockPage.leaving()) {
+  if (const std::uint16_t voice = unlock::nextVoice(after.unlockPage.notice())) {
+   auto& sound = SoundSystem::instance(); sound.stopSlot(VoiceSlot, 2); sound.play(voice, VoiceSlot);
+  }
+ }
  const bool pageChanged = before.page != after.page;
  if (after.unavailable && !before.unavailable) {
   // A "Not available" message: MessageBox BeforeEntranceAnimations (SE_UI_CTRL_WIN_POPUP).
@@ -184,7 +197,8 @@ void MenuSound::startBgm() {
  // 2-10 at 0, and the menu voices play on player 8.
  for (std::uint32_t p = 0; p < 11; ++p) if (p != 1) post(SoundCommand::PlayerVolume, 0, p, 1.0f);
  // MenuRSARPlayer::OnLoad (8070e130) -> SinglePlayer::PlayBGSound -> PlaySound(Section::GetSoundId).
- const std::uint32_t sound = section_ == Section::Title ? std::uint32_t(id::W_BGM_TITLE) : std::uint32_t(id::SEQ_O_SELECT);
+ // Section_GetSoundId (fn_1_1218B4 PAL 0x80631C68): 0x90-0x93 -> 0x73 STRM_O_LEVEL_OPEN_FAN.
+ const std::uint32_t sound = section_ == Section::Title ? std::uint32_t(id::W_BGM_TITLE) : section_ == Section::Unlock ? std::uint32_t(id::STRM_O_LEVEL_OPEN_FAN) : std::uint32_t(id::SEQ_O_SELECT);
  slot_ = slot_ == BgmSlots[0] ? BgmSlots[1] : BgmSlots[0];
  bgm_ = sound;
  SoundSystem::instance().play(sound, slot_);
@@ -217,7 +231,8 @@ void MenuSound::enterSection(Section next, const MenuState& visual) {
  // BGM's 20-frame fade.
  loadSections(groupOf(next), 0xFFFFFFFF, 400);
  loaded_ = next;
- pendingStart_ = next == Section::Title || next == Section::Single ? 1 : -1;
+ pendingStart_ = next == Section::Title || next == Section::Single || next == Section::Unlock ? 1 : -1;
+ unlockBit_ = next == Section::Unlock ? visual.unlockPage.notice().bit : ~0u;
  sceneWait_ = 0;
  // The section's new RSAR player (PAL 0x80713E90): +4 unset, and the
  // ValuesMgr/StreamsMgr tracks reset to 1.0 (fn_1_1E9A6C / fn_1_1EA1F8 -> EGG
@@ -281,7 +296,7 @@ namespace { constexpr unsigned SceneWaitLimit = 180; }
 bool MenuSound::ready(UiPage page) const {
  if (!SoundSystem::instance().available()) return true;
  const Section s = sectionOf(page);
- if (s != Section::Title && s != Section::Single) return true;
+ if (s != Section::Title && s != Section::Single && s != Section::Unlock) return true;
  if (s != section_) return false;   // its scene (frame's incoming) is not created yet
  return pendingStart_ <= 0 || sceneWait_ >= SceneWaitLimit || SoundSystem::instance().sceneReady();
 }
@@ -297,6 +312,8 @@ void MenuSound::frame(const MenuState& visual, bool revealed, unsigned steps, in
  const MenuState& scene = incoming ? *incoming : visual;
  const Section next = sectionOf(scene.page);
  if ((revealed || incoming || section_ == Section::None || section_ == Section::Race) && next != section_ && next != Section::Race) enterSection(next, scene);
+ // Each unlock page is its own section (0x90-0x93): the fanfare starts again.
+ else if (next == Section::Unlock && section_ == Section::Unlock && scene.unlockPage.notice().bit != unlockBit_ && (revealed || incoming)) enterSection(next, scene);
  // The group load's completion starts the BGM (fn_1_1EA250, PAL 0x806FA604 ->
  // PlaySound(id, 0)) as the scene fades in: ready() holds the page until then,
  // so this is the first frame the section's page is on screen.
